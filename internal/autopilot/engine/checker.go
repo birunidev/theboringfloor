@@ -14,10 +14,14 @@ import (
 )
 
 // CmdChecker runs configured checks directly (no shell) in the worktree.
+// Checks run agent-written code, so they require a Sandbox unless
+// Unsandboxed is set (only for trusted setup commands and tests).
 type CmdChecker struct {
-	Dir     string
-	Checks  []Check
-	Timeout time.Duration // per command, default 15m
+	Dir         string
+	Checks      []Check
+	Timeout     time.Duration // per command, default 15m
+	Sandbox     *Sandbox
+	Unsandboxed bool
 }
 
 // Run implements pipeline.Checker. A command that cannot start counts as a
@@ -32,8 +36,19 @@ func (c CmdChecker) Run(ctx context.Context) ([]pipeline.CheckResult, error) {
 		if len(ch.Argv) == 0 {
 			continue
 		}
+		argv := ch.Argv
+		if !c.Unsandboxed {
+			if c.Sandbox == nil {
+				return out, ErrNoSandbox
+			}
+			wrapped, err := c.Sandbox.Wrap(ch.Argv)
+			if err != nil {
+				return out, err
+			}
+			argv = wrapped
+		}
 		cctx, cancel := context.WithTimeout(ctx, to)
-		cmd := exec.CommandContext(cctx, ch.Argv[0], ch.Argv[1:]...)
+		cmd := exec.CommandContext(cctx, argv[0], argv[1:]...)
 		cmd.Dir = c.Dir
 		cmd.Env = append(os.Environ(), "CI=1")
 		var buf bytes.Buffer

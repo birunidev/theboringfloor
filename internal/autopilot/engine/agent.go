@@ -3,7 +3,6 @@ package engine
 import (
 	"context"
 	"fmt"
-	"strings"
 	"sync"
 
 	"github.com/theboringhumane/theboringfloor/internal/autopilot/ocv2"
@@ -36,9 +35,8 @@ func (a *OCAgent) policy(role pipeline.Role) *ocv2.Policy {
 		p.Space = ocv2.NewSpaceGate(ocv2.DefaultSpaceReads, a.DoneListIDs...)
 	case pipeline.RoleImplement:
 		p.WriteActions = a.Cfg.WriteActions
-		for _, c := range a.Checks {
-			p.Bash = append(p.Bash, strings.Join(c.Argv, " "))
-		}
+		// Check commands run agent-written code, so only the autopilot runs
+		// them, inside the bwrap sandbox. The implementer gets read-only git.
 		p.Bash = append(p.Bash, a.Cfg.ExtraBash...)
 		p.Bash = append(p.Bash, "git status", "git diff", "git log", "ls")
 	case pipeline.RoleReview:
