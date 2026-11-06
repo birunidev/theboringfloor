@@ -38,6 +38,8 @@ type BoardConfig struct {
 	Label       string   `json:"label"`
 	PolicyCards []string `json:"policy_cards"` // e.g. the READ FIRST objectives card
 	Checks      []Check  `json:"checks"`
+	// SandboxReadOnly are extra paths (venvs, dependency dirs) checks may read.
+	SandboxReadOnly []string `json:"sandbox_read_only"`
 	// Setup commands run in a fresh worktree before checks (e.g. symlink deps).
 	Setup []Check `json:"setup"`
 }

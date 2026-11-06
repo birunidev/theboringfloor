@@ -76,8 +76,8 @@ Hard rules:
 - Change ONLY files matching these scope paths: %s
 - Never touch .env or secret files, CI workflows, lockfiles you did not need, or anything outside the worktree.
 - Do NOT commit, push, open PRs, deploy, or change the board. The autopilot does that after independent review.
-- Shell access is limited to an allowlist; a rejected command is final, do not try to work around it.
-- The autopilot will itself run: %s
+- Shell access is limited to read-only git commands (git status, git diff, git log, ls); a rejected command is final, do not try to work around it.
+- You cannot run tests yourself. After your turn the autopilot runs these checks in a sandbox and sends you any failures: %s
 
 Acceptance criteria:
 %s

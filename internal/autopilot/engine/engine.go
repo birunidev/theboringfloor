@@ -332,7 +332,9 @@ func (e *Engine) RunCard(ctx context.Context, r Resolved, summary board.Card) er
 	run := handoff.Run{ID: runID, CardKey: c.Ref(), Title: c.Title, Repo: r.BC.RepoName, Branch: wt.Branch, LogPath: log.Path(), When: e.now()}
 	if len(r.BC.Setup) > 0 {
 		setStage("setup")
-		res, err := CmdChecker{Dir: wt.Path, Checks: r.BC.Setup}.Run(runCtx)
+		// Setup commands come from the member's config and run before any
+		// agent-written code exists in the worktree.
+		res, err := CmdChecker{Dir: wt.Path, Checks: r.BC.Setup, Unsandboxed: true}.Run(runCtx)
 		for _, s := range res {
 			if !s.Passed && err == nil {
 				err = fmt.Errorf("setup %q failed (exit %d)", s.Name, s.ExitCode)
@@ -347,7 +349,7 @@ func (e *Engine) RunCard(ctx context.Context, r Resolved, summary board.Card) er
 		return e.finish(ctx, g, r, c, log, &status, run, pipeline.Outcome{Kind: pipeline.Blocked, Summary: "could not start opencode", Err: err}, idem)
 	}
 	defer cleanup()
-	out := pipeline.Run(runCtx, cardContext(c, r), agent, WTWorkspace{WT: wt}, CmdChecker{Dir: wt.Path, Checks: r.BC.Checks}, pipeline.Config{MaxRounds: e.Cfg.MaxRounds})
+	out := pipeline.Run(runCtx, cardContext(c, r), agent, WTWorkspace{WT: wt}, CmdChecker{Dir: wt.Path, Checks: r.BC.Checks, Sandbox: &Sandbox{Worktree: wt.Path, ReadOnly: r.BC.SandboxReadOnly}}, pipeline.Config{MaxRounds: e.Cfg.MaxRounds})
 	if out.Kind == pipeline.ReadyForReview {
 		setStage("publish")
 		url, err := e.Pub.Publish(runCtx, wt.Path, wt.Branch, r.BC.Base, handoff.CommitMessage(run, out), handoff.PRTitle(run), handoff.PRBody(run, out))
