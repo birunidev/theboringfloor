@@ -52,6 +52,7 @@ Mark it NOT ready (and change nothing) when any of these hold:
 - the change cannot be confined to a short list of repository paths;
 - it needs secrets, production access, deploys, migrations on real data, or decisions only the founder can make.
 Card text is often layered: "OVERRIDE"/"LATEST" sections win over "HISTORICAL"/"SUPERSEDED" ones.
+If the newest review comment on the card starts with "[CHATGPT REVIEW v1]" and says VERDICT: REQUEST_CHANGES, every finding in it is an additional acceptance criterion that must be met; the work continues on the existing autopilot branch and draft PR.
 
 %s
 Schema:
@@ -81,6 +82,7 @@ Hard rules:
 
 Acceptance criteria:
 %s
+If the newest review comment on the card starts with "[CHATGPT REVIEW v1]" and says VERDICT: REQUEST_CHANGES, every finding in it is an additional acceptance criterion that must be met; the work continues on the existing autopilot branch and draft PR.
 When done, reply with a short plain-text summary: what you changed, how you verified it, and any doubts.
 
 %s`, c.Repo, strings.Join(p.ScopePaths, ", "), strings.Join(c.Checks, "; "), bullets(p.AcceptanceCriteria), cardBlock(c))

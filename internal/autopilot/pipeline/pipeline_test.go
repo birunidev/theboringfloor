@@ -237,3 +237,15 @@ func TestPromptFencing(t *testing.T) {
 		t.Fatal("schema example must not contain // comments")
 	}
 }
+
+func TestPromptsCarryChatGPTReviewRule(t *testing.T) {
+	c := CardContext{Key: "BII-1", Repo: "r"}
+	for name, p := range map[string]string{"preflight": PreflightPrompt(c), "implement": ImplementPrompt(c, Preflight{AcceptanceCriteria: []string{"x"}, ScopePaths: []string{"a/**"}})} {
+		if !strings.Contains(p, "[CHATGPT REVIEW v1]") || !strings.Contains(p, "REQUEST_CHANGES") {
+			t.Errorf("%s prompt does not tell the agent to honor ChatGPT review findings", name)
+		}
+		if strings.Contains(p, "%!") {
+			t.Errorf("%s prompt has a formatting error", name)
+		}
+	}
+}

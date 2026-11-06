@@ -26,6 +26,10 @@ type Run struct {
 	PRURL   string
 	LogPath string
 	When    time.Time
+	// Review packet extras (set by the engine when a card reaches Review).
+	GitHubRepo string // owner/name
+	Base       string // branch the PR targets
+	Diff       string // full patch against the base
 }
 
 func header(kind string, r Run) string {
@@ -44,9 +48,20 @@ func checksLines(cs []pipeline.CheckResult) string {
 		if !c.Passed {
 			st = fmt.Sprintf("FAIL (exit %d)", c.ExitCode)
 		}
-		fmt.Fprintf(&b, "- `%s` — %s\n", c.Cmd, st)
+		fmt.Fprintf(&b, "- `%s` — %s\n", ShortCmd(c.Cmd), st)
 	}
 	return b.String()
+}
+
+// ShortCmd drops the directory from an absolute executable path so card
+// comments do not expose local paths ("/home/u/venv/bin/python -m x" ->
+// "python -m x").
+func ShortCmd(cmd string) string {
+	fields := strings.Fields(cmd)
+	if len(fields) > 0 && strings.HasPrefix(fields[0], "/") {
+		fields[0] = filepath.Base(fields[0])
+	}
+	return strings.Join(fields, " ")
 }
 
 func reviewerLines(vs []pipeline.Verdict) string {

@@ -349,6 +349,7 @@ func (e *Engine) RunCard(ctx context.Context, r Resolved, summary board.Card) er
 		return e.finish(ctx, g, r, c, log, &status, run, pipeline.Outcome{Kind: pipeline.Blocked, Summary: "could not start opencode", Err: err}, idem)
 	}
 	defer cleanup()
+	run.Base = r.BC.Base
 	out := pipeline.Run(runCtx, cardContext(c, r), agent, WTWorkspace{WT: wt}, CmdChecker{Dir: wt.Path, Checks: r.BC.Checks, Sandbox: &Sandbox{Worktree: wt.Path, ReadOnly: r.BC.SandboxReadOnly}}, pipeline.Config{MaxRounds: e.Cfg.MaxRounds})
 	if out.Kind == pipeline.ReadyForReview {
 		setStage("publish")
@@ -357,6 +358,10 @@ func (e *Engine) RunCard(ctx context.Context, r Resolved, summary board.Card) er
 			out.Kind, out.Summary, out.Err = pipeline.Blocked, "passed review but publishing failed", err
 		} else {
 			run.PRURL = url
+			run.GitHubRepo = githubRepoFromPR(url)
+			if d, err := worktree.Diff(runCtx, wt); err == nil {
+				run.Diff = d
+			}
 		}
 	}
 	return e.finish(ctx, g, r, c, log, &status, run, out, idem)
@@ -370,7 +375,7 @@ func (e *Engine) finish(ctx context.Context, g *board.Guard, r Resolved, c board
 	var comment, list string
 	switch out.Kind {
 	case pipeline.ReadyForReview:
-		comment, list = handoff.HandoffComment(run, out), r.Review
+		comment, list = handoff.ReviewPacket(run, out), r.Review
 	case pipeline.NeedsClarification:
 		path, _ := handoff.WriteChatGPTPrompt(dirOf(log.Path()), run, out.Preflight)
 		comment, list = handoff.ClarificationComment(run, out.Preflight, path), r.Clarify
@@ -407,6 +412,16 @@ func (e *Engine) watchStop(ctx context.Context, cancel context.CancelFunc) {
 			}
 		}
 	}
+}
+
+// githubRepoFromPR turns https://github.com/o/r/pull/3 into o/r.
+func githubRepoFromPR(u string) string {
+	p := strings.TrimPrefix(u, "https://github.com/")
+	parts := strings.Split(p, "/")
+	if len(parts) >= 2 && parts[0] != "" {
+		return parts[0] + "/" + parts[1]
+	}
+	return ""
 }
 
 func dirOf(p string) string {
