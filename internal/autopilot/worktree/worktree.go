@@ -144,6 +144,33 @@ func (m Manager) Prepare(ctx context.Context, repo Repo, cardKey string) (Worktr
 	return wt, nil
 }
 
+// PrepareDetached creates a throwaway worktree at origin/<base> with no
+// branch, for read-only work (dry runs). Remove it with RemoveDetached.
+func (m Manager) PrepareDetached(ctx context.Context, repo Repo, name string) (Worktree, error) {
+	if repo.Name == "" || repo.Dir == "" {
+		return Worktree{}, errors.New("worktree: repo name and dir are required")
+	}
+	if m.Fetch {
+		if _, err := git(ctx, repo.Dir, "fetch", "--quiet", repo.remote(), repo.base()); err != nil {
+			return Worktree{}, err
+		}
+	}
+	baseSHA, err := git(ctx, repo.Dir, "rev-parse", "--verify", repo.BaseRef()+"^{commit}")
+	if err != nil {
+		return Worktree{}, fmt.Errorf("worktree: base %s not found: %w", repo.BaseRef(), err)
+	}
+	path := filepath.Join(m.Root, unsafeKey.ReplaceAllString(repo.Name, "_"), "dry-"+strings.Trim(unsafeKey.ReplaceAllString(name, "-"), "-."))
+	_ = os.RemoveAll(path)
+	_, _ = git(ctx, repo.Dir, "worktree", "prune")
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return Worktree{}, err
+	}
+	if _, err := git(ctx, repo.Dir, "worktree", "add", "--quiet", "--detach", path, baseSHA); err != nil {
+		return Worktree{}, err
+	}
+	return Worktree{Path: path, BaseSHA: baseSHA}, nil
+}
+
 // Remove deletes the worktree directory. The branch is kept: it backs the PR.
 func (m Manager) Remove(ctx context.Context, repo Repo, wt Worktree, force bool) error {
 	args := []string{"worktree", "remove"}

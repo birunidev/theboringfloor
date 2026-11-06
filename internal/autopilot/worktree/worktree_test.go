@@ -161,6 +161,28 @@ func TestChangedFilesAndDiff(t *testing.T) {
 	}
 }
 
+func TestPrepareDetached(t *testing.T) {
+	repo, _ := fixture(t)
+	ctx := context.Background()
+	m := Manager{Root: filepath.Join(t.TempDir(), "wt")}
+	wt, err := m.PrepareDetached(ctx, repo, "BII-9")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b := run(t, wt.Path, "rev-parse", "--abbrev-ref", "HEAD"); b != "HEAD" {
+		t.Fatalf("dry worktree is on branch %q, want detached", b)
+	}
+	if out := run(t, repo.Dir, "branch", "--list", "autopilot/*"); out != "" {
+		t.Fatalf("dry run created a branch: %s", out)
+	}
+	if err := m.Remove(ctx, repo, wt, true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(wt.Path); !os.IsNotExist(err) {
+		t.Fatal("dry worktree not removed")
+	}
+}
+
 func TestBranchSafety(t *testing.T) {
 	for _, tc := range []struct {
 		key, want string

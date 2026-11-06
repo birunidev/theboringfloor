@@ -21,6 +21,10 @@ type Policy struct {
 	Root string
 	// ReadActions may read paths inside Root (e.g. read, glob, grep, list).
 	ReadActions []string
+	// PatternActions search inside Root with a pattern resource instead of
+	// a path (glob "**/*.go", grep "TODO"). Allowed when no pattern is
+	// absolute or climbs out with a ".." segment.
+	PatternActions []string
 	// WriteActions may modify paths inside Root (e.g. edit, write, patch).
 	// Empty for read-only stages. Writes into .git are always refused.
 	WriteActions []string
@@ -49,13 +53,15 @@ func (p *Policy) Decide(r PermissionRequest) Decision {
 			return reject("Space tools not allowed in this stage")
 		}
 		return p.Space.Decide(strings.TrimPrefix(a, SpaceServer+"_"), r.Input())
-	case strings.Contains(a, "_") && !contains(p.ReadActions, a) && !contains(p.WriteActions, a) && a != p.BashAction:
+	case strings.Contains(a, "_") && !contains(p.ReadActions, a) && !contains(p.WriteActions, a) && !contains(p.PatternActions, a) && a != p.BashAction:
 		// Another MCP server's tool (github_*, figma-mcp_*, ...).
 		return reject("MCP server not allowed: " + a)
 	case p.BashAction != "" && a == p.BashAction:
 		return p.decideBash(r.Resources)
 	case contains(p.WriteActions, a):
 		return p.decidePaths(r.Resources, true)
+	case contains(p.PatternActions, a):
+		return decidePatterns(r.Resources)
 	case contains(p.ReadActions, a):
 		return p.decidePaths(r.Resources, false)
 	}
@@ -117,6 +123,20 @@ func (p *Policy) inside(res string, write bool) error {
 		return fmt.Errorf("refusing write into .git: %q", res)
 	}
 	return nil
+}
+
+func decidePatterns(resources []string) Decision {
+	for _, res := range resources {
+		if filepath.IsAbs(res) || strings.HasPrefix(res, "~") {
+			return reject(fmt.Sprintf("absolute search pattern %q", res))
+		}
+		for _, seg := range strings.Split(filepath.ToSlash(res), "/") {
+			if seg == ".." {
+				return reject(fmt.Sprintf("search pattern leaves the worktree: %q", res))
+			}
+		}
+	}
+	return allow("search inside worktree")
 }
 
 func (p *Policy) decideBash(resources []string) Decision {

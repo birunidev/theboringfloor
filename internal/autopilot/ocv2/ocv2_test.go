@@ -148,6 +148,23 @@ func TestPolicyPaths(t *testing.T) {
 	}
 }
 
+func TestPolicyPatterns(t *testing.T) {
+	p := &Policy{Root: t.TempDir(), PatternActions: []string{"glob", "grep"}}
+	for res, want := range map[string]bool{
+		"**/*":            true,
+		"backend/**/*.py": true,
+		"TODO":            true,
+		"../**":           false,
+		"/etc/**":         false,
+		"~/.ssh/*":        false,
+		"a/../../b":       false,
+	} {
+		if d := p.Decide(PermissionRequest{Action: "glob", Resources: []string{res}}); d.Allow != want {
+			t.Errorf("glob %q: allow=%v (%s), want %v", res, d.Allow, d.Reason, want)
+		}
+	}
+}
+
 func TestPolicyBash(t *testing.T) {
 	p := &Policy{Root: t.TempDir(), BashAction: "bash", Bash: []string{"go test", "go vet", "git status", "git diff", "npm run lint"}}
 	cases := map[string]bool{
