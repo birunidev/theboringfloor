@@ -14,3 +14,6 @@ dist/
 /soundtest
 /main
 /floorshot
+
+# local builds
+/bin/
