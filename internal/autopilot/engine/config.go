@@ -133,6 +133,9 @@ func (c Config) Validate() error {
 		if b.BoardID == "" || b.RepoName == "" || b.RepoDir == "" {
 			return fmt.Errorf("config: board %q needs board_id, repo_name and repo_dir", b.Name)
 		}
+		if NoLabel(b.Label) && strings.EqualFold(strings.TrimSpace(b.ReadyList), "todo") {
+			return fmt.Errorf("config: board %q selects every card in %q; use a dedicated queue list (e.g. \"Autopilot Queue\") when label is none", b.Name, b.ReadyList)
+		}
 		for _, l := range []string{b.ReadyList, b.WorkingList, b.ReviewList, b.BlockedList, b.ClarifyList} {
 			if strings.EqualFold(strings.TrimSpace(l), strings.TrimSpace(b.DoneList)) {
 				return fmt.Errorf("config: board %q routes cards into its Done list %q", b.Name, l)

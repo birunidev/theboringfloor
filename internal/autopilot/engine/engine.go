@@ -76,6 +76,10 @@ func (e *Engine) Resolve(ctx context.Context, bc BoardConfig) (Resolved, error) 
 	r := Resolved{BC: bc, Info: info,
 		Ready: info.ListID(bc.ReadyList), Review: info.ListID(bc.ReviewList), Blocked: info.ListID(bc.BlockedList),
 		Clarify: info.ListID(bc.ClarifyList), Done: info.ListID(bc.DoneList), Label: info.LabelID(bc.Label)}
+	if NoLabel(bc.Label) {
+		// A dedicated queue list is the switch: every card in it is eligible.
+		r.Label = anyLabel
+	}
 	if bc.WorkingList != "" {
 		r.Working = info.ListID(bc.WorkingList)
 		if r.Working == "" {
@@ -108,7 +112,13 @@ func (e *Engine) Resolve(ctx context.Context, bc BoardConfig) (Resolved, error) 
 	return r, nil
 }
 
-// Candidates are the ready-list cards carrying the autopilot label.
+const anyLabel = "\x00any"
+
+// NoLabel reports a config that selects cards by list alone ("label": "none").
+func NoLabel(label string) bool { return strings.EqualFold(strings.TrimSpace(label), "none") }
+
+// Candidates are the ready-list cards carrying the autopilot label (or all
+// of them when the board uses a dedicated queue list).
 func (e *Engine) Candidates(ctx context.Context, r Resolved) ([]board.Card, error) {
 	if r.Label == "" {
 		return nil, nil
@@ -119,7 +129,7 @@ func (e *Engine) Candidates(ctx context.Context, r Resolved) ([]board.Card, erro
 	}
 	var out []board.Card
 	for _, c := range cards {
-		if c.HasLabel(r.Label) && c.ListID == r.Ready {
+		if (r.Label == anyLabel || c.HasLabel(r.Label)) && c.ListID == r.Ready {
 			out = append(out, c)
 		}
 	}
