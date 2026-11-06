@@ -160,7 +160,7 @@ func TestLiveReadyGoesToReviewNeverDone(t *testing.T) {
 		}
 	}
 	comments := fb.Comments["c1"]
-	if len(comments) != 2 || !strings.Contains(comments[0], "AUTOPILOT CLAIMED") || !strings.Contains(comments[1], "AUTOPILOT HANDOFF") || !strings.Contains(comments[1], "/pull/99") {
+	if len(comments) != 2 || !strings.Contains(comments[0], "AUTOPILOT CLAIMED") || !strings.Contains(comments[1], "AUTOPILOT REVIEW PACKET v1") || !strings.Contains(comments[1], "/pull/99") {
 		t.Fatalf("comments = %q", comments)
 	}
 	if c2, _ := fb.GetCard(context.Background(), "c2"); c2.ListID != "l-todo" || len(fb.Comments["c2"]) != 0 {
