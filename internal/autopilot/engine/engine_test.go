@@ -222,6 +222,29 @@ func TestNoLabelNothingToDo(t *testing.T) {
 	}
 }
 
+func TestQueueListWithoutLabel(t *testing.T) {
+	e, fb, _, _ := setup(t, notReadyPre, allLists, nil)
+	e.Cfg.Boards[0].Label = "none"
+	sp := e.Space.(fakeSpace)
+	sp.info.Labels = nil // the board has no labels at all
+	e.Space = sp
+	if err := e.Tick(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	// Both Todo cards are now eligible; the first one was worked.
+	if len(fb.Comments) != 1 {
+		t.Fatalf("expected exactly one card worked, comments=%v", fb.Comments)
+	}
+}
+
+func TestConfigRefusesNoLabelOnTodo(t *testing.T) {
+	c := Config{Boards: []BoardConfig{{BoardID: "b", RepoName: "r", RepoDir: "/x", Label: "none", ReadyList: "Todo"}}}
+	c.Defaults()
+	if err := c.Validate(); err == nil {
+		t.Fatal("label none on the shared Todo list must be refused")
+	}
+}
+
 func TestConfigRefusesDoneRouting(t *testing.T) {
 	c := Config{Boards: []BoardConfig{{BoardID: "b", RepoName: "r", RepoDir: "/x", ReviewList: "Done"}}}
 	c.Defaults()
