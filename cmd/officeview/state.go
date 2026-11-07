@@ -67,17 +67,26 @@ type runInfo struct {
 	Modified string `json:"modified"`
 }
 
+// clarificationDetails comes from the pre-flight verdict written by the
+// engine into the end log. It is reported context, not a verified policy ruling.
+type clarificationDetails struct {
+	Summary     string   `json:"summary,omitempty"`
+	PolicyBlock string   `json:"policyBlock,omitempty"`
+	Questions   []string `json:"questions,omitempty"`
+}
+
 // outcome is one real `end` event from a run log written today (server-local
 // day). It is a run record, never a claim about current board membership.
 type outcome struct {
-	Card    string `json:"card"`
-	Run     string `json:"run"`
-	Kind    string `json:"kind"`
-	Summary string `json:"summary"`
-	PR      string `json:"pr"`
-	Rounds  *int64 `json:"rounds"`
-	TS      string `json:"ts"`
-	EventID string `json:"eventId"`
+	Card          string                `json:"card"`
+	Run           string                `json:"run"`
+	Kind          string                `json:"kind"`
+	Summary       string                `json:"summary"`
+	Clarification *clarificationDetails `json:"clarification,omitempty"`
+	PR            string                `json:"pr"`
+	Rounds        *int64                `json:"rounds"`
+	TS            string                `json:"ts"`
+	EventID       string                `json:"eventId"`
 }
 type snapshot struct {
 	Status       *status   `json:"status"`
@@ -568,8 +577,16 @@ func (o *office) todayOutcomes(root *os.Root, runs []runInfo, now time.Time) ([]
 				continue
 			}
 			seen[run+":"+card] = true
+			var clarification *clarificationDetails
+			if kind == "needs-clarification" && len(data["clarification"]) > 0 {
+				var details clarificationDetails
+				if err := json.Unmarshal(data["clarification"], &details); err == nil {
+					clarification = &details
+				}
+			}
 			out = append(out, outcome{Card: card, Run: run, Kind: kind, Summary: str(data, "summary"),
-				PR: str(data, "pr"), Rounds: number(data, "rounds", true), TS: ts, EventID: e.ID})
+				Clarification: clarification, PR: str(data, "pr"),
+				Rounds: number(data, "rounds", true), TS: ts, EventID: e.ID})
 		}
 		if len(out) >= 200 {
 			break
