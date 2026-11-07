@@ -155,6 +155,9 @@ func ClarificationComment(r Run, p pipeline.Preflight, promptPath string) string
 	var b strings.Builder
 	b.WriteString(header("NEEDS CLARIFICATION", r) + "\n")
 	b.WriteString("Pre-flight stopped before any code change.\n")
+	if s := strings.TrimSpace(p.Summary); s != "" {
+		fmt.Fprintf(&b, "\n**Why this needs clarification (pre-flight reported):** %s\n", oneLine(clip(s, 500)))
+	}
 	if p.PolicyBlock != "" {
 		fmt.Fprintf(&b, "\n**Blocked by policy:** %s\n", oneLine(clip(p.PolicyBlock, 600)))
 	}
