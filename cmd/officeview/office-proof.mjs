@@ -124,6 +124,87 @@ const fixtures = {
   },
 };
 
+// Writes workers.json + status.json exactly as Engine.persistStatusesLocked
+// does: one timestamp for both; status.json is the "N lanes active" summary.
+const writeLanes = (home, stamp, lanes) => {
+  put(home, "workers.json", { version: 1, updatedAt: stamp, workers: lanes.map((l) => ({ ...l, updatedAt: stamp })) });
+  put(home, "status.json", { state: "running", updatedAt: stamp, note: `${lanes.length} lanes active; see workers.json` });
+};
+const laneEntry = (lane, run, card, title, stage, round, logPath, tokens) =>
+  ({ lane, state: "running", run, card, title, stage, round, tokens, logPath });
+
+fixtures.lanes = (home) => {
+  const stamp = iso(-3);
+  put(home, "usage.json", { day: iso().slice(0, 10), today: 1700000, cards: { "BII-TEST-BE": 52000, "BII-TEST-FE": 19000 } });
+  const be = runLog(home, "BII-TEST-BE", "r-be", [
+    { kind: "start", ts: iso(-60), msg: "claimed (TEST DATA)" },
+    { kind: "stage", stage: "implement:1", ts: iso(-50), msg: "session ses_TEST_be" },
+    perm("implement:1", "read", true, "read inside worktree", iso(-45)),
+    perm("implement:1", "glob", true, "search inside worktree", iso(-40)),
+    perm("implement:1", "shell", false, 'shell metacharacters not allowed: "ls -la a && b"', iso(-35)),
+    perm("implement:1", "edit", true, "write inside worktree", iso(-30)),
+  ]);
+  const fe = runLog(home, "BII-TEST-FE", "r-fe", [
+    { kind: "start", ts: iso(-40), msg: "claimed (TEST DATA)" },
+    { kind: "stage", stage: "preflight", ts: iso(-30), msg: "session ses_TEST_fe" },
+    perm("preflight", "read", true, "read inside worktree", iso(-25)),
+  ]);
+  writeLanes(home, stamp, [
+    laneEntry("backend", "r-be", "BII-TEST-BE", "TEST DATA · Backend lane card", "implement:1", 1, be, 52000),
+    laneEntry("frontend", "r-fe", "BII-TEST-FE", "TEST DATA · Frontend lane card", "preflight", 1, fe, 19000),
+  ]);
+  return {
+    strip: "Working · 2 lanes in parallel (workers.json) · backend · Implementing | frontend · Pre-flight",
+    activeStations: 2,
+    lanes: {
+      rows: 2, workers: 2, singleWorkerHidden: true, stage: "2 lanes active", noWarning: true,
+      badges: { implement: (w) => (w >= 1100 ? "Working" : "Working · backend"), preflight: (w) => (w >= 1100 ? "Working" : "Working · frontend") },
+      usage: { backend: "This card: 52K / 2M", frontend: "This card: 19K / 2M" },
+      cardMeter: "Per lane",
+      noFinishedHistory: true,
+      ticker: ["[backend] Allowed: read", "[backend] Rejected: shell", "[frontend] Stage: preflight"],
+      inspectLane: { lane: "backend", has: ["Lane backend · BII-TEST-BE", "session ses_TEST_be", "× Rejected: shell", "3 allowed · 1 rejected"], hasNot: ["Lane frontend"] },
+    },
+    inspect: { station: "implement", texts: ["Lane backend · BII-TEST-BE", "session ses_TEST_be", "× Rejected: shell"] },
+  };
+};
+fixtures["lanes-same-desk"] = (home) => {
+  const stamp = iso(-3);
+  put(home, "usage.json", { day: iso().slice(0, 10), today: 1700000, cards: {} });
+  const a = runLog(home, "BII-TEST-BE", "r-be", [
+    { kind: "stage", stage: "implement:1", ts: iso(-50), msg: "session ses_TEST_be" },
+    perm("implement:1", "read", true, "read inside worktree", iso(-45)),
+  ]);
+  const b = runLog(home, "BII-TEST-FE", "r-fe", [
+    { kind: "stage", stage: "implement:2", ts: iso(-40), msg: "session ses_TEST_fe" },
+    perm("implement:2", "edit", true, "write inside worktree", iso(-35)),
+    perm("implement:2", "shell", false, "command not on allowlist", iso(-34)),
+  ]);
+  writeLanes(home, stamp, [
+    laneEntry("backend", "r-be", "BII-TEST-BE", "TEST DATA · Backend", "implement:1", 1, a, 3000),
+    laneEntry("frontend", "r-fe", "BII-TEST-FE", "TEST DATA · Frontend", "implement:2", 2, b, 4000),
+  ]);
+  return {
+    strip: "Working · 2 lanes in parallel (workers.json) · backend · Implementing | frontend · Implementing",
+    activeStations: 1,
+    lanes: { rows: 2, workers: 2, badges: { implement: (w) => (w >= 1100 ? "Working · 2 lanes" : "Working · 2 lanes (backend, frontend)") }, implementFacts: "2 lanes", spread: true, tagsStacked: true },
+  };
+};
+fixtures["lanes-unavailable"] = (home) => {
+  put(home, "usage.json", { day: iso().slice(0, 10), today: 1700000, cards: {} });
+  // workers.json is OLDER than status.json: a later single-worker write.
+  put(home, "workers.json", { version: 1, updatedAt: iso(-600), workers: [
+    laneEntry("backend", "r-old1", "BII-OLD-1", "old", "implement:1", 1, "", 1),
+    laneEntry("frontend", "r-old2", "BII-OLD-2", "old", "preflight", 1, "", 1),
+  ] });
+  put(home, "status.json", { state: "running", updatedAt: iso(-2), note: "2 lanes active; see workers.json" });
+  return {
+    strip: "Running · Stage unavailable",
+    activeStations: 0,
+    lanes: { rows: 0, workers: 0, warning: "Lane details unavailable · workers.json is older than status.json" },
+  };
+};
+
 function serve(home) {
   return new Promise((resolve, reject) => {
     const p = spawn(BIN, ["--home", home, "--test-data", "--bind", "127.0.0.1:0"]);
@@ -190,6 +271,54 @@ for (const [name, build] of Object.entries(fixtures)) {
             expect.gateBadges.every((want, index) => gateText[index]?.includes(want)),
             gateText.join(" | "),
           );
+        }
+        if (expect.lanes) {
+          const L = expect.lanes;
+          if (L.rows !== undefined) check(`${tag}: lane rows`, (await page.locator(".lane-row").count()) === L.rows);
+          if (L.workers !== undefined) check(`${tag}: lane workers`, (await page.locator(".lane-worker").count()) === L.workers);
+          if (L.singleWorkerHidden) check(`${tag}: single worker hidden in lane mode`, await page.isHidden("#worker"));
+          if (L.stage) check(`${tag}: HUD stage`, (await page.textContent("#stage")).trim() === L.stage);
+          if (L.noWarning) check(`${tag}: no lane warning`, await page.isHidden("#lanes-warning"));
+          if (L.warning) {
+            check(`${tag}: lane warning shown`, await page.isVisible("#lanes-warning"));
+            check(`${tag}: lane warning text`, (await page.textContent("#lanes-warning")).includes(L.warning), (await page.textContent("#lanes-warning")).trim());
+          }
+          for (const [st, want] of Object.entries(L.badges || {})) {
+            const text = typeof want === "function" ? want(width) : want;
+            const got = (await page.textContent(`#station-${st} .badge`)).trim();
+            // Exact match after the leading icon: a short badge must not hide names or extra words.
+            check(`${tag}: ${st} desk badge`, got.replace(/^\S+\s/, "") === text, got);
+          }
+          for (const [lane, text] of Object.entries(L.usage || {}))
+            check(`${tag}: ${lane} card usage`, (await page.locator(".lane-row", { hasText: lane }).first().textContent()).includes(text));
+          if (L.cardMeter) check(`${tag}: card meter says per lane`, (await page.textContent("#card-meter")).includes(L.cardMeter));
+          if (L.noFinishedHistory) check(`${tag}: no finished-run label while lanes run`, !(await page.textContent("#activity-status")).includes("finished run history"));
+          if (L.tagsStacked && width >= 1100) {
+            const ys = await page.locator(".lane-tag:visible").evaluateAll((n) => n.map((e) => e.getBoundingClientRect().y));
+            check(`${tag}: shared-desk labels do not overlap`, ys.length === 2 && Math.abs(ys[0] - ys[1]) >= 20, ys.join(", "));
+          }
+          if (L.implementFacts) check(`${tag}: shared desk facts`, (await page.textContent("#station-implement .facts")).trim() === L.implementFacts);
+          const ticker = await page.textContent("#events");
+          for (const t of L.ticker || []) check(`${tag}: ticker "${t}"`, ticker.includes(t));
+          if (L.spread) {
+            const xs = await page.locator(".lane-worker").evaluateAll((n) => n.map((e) => e.getBoundingClientRect().x));
+            check(`${tag}: lanes sharing a desk are spaced apart`, xs.length === 2 && Math.abs(xs[0] - xs[1]) >= 20, xs.join(", "));
+          }
+          if (L.workers) {
+            const visibleTags = await page.locator(".lane-tag:visible").count();
+            check(`${tag}: lane labels shown only on desktop`, visibleTags === (width >= 1100 ? L.workers : 0), `${visibleTags}`);
+          }
+          if (L.inspectLane) {
+            const btn = page.locator(".lane-row button", { hasText: `Inspect ${L.inspectLane.lane}` });
+            await btn.click();
+            await page.waitForSelector("#inspector[open]");
+            const body = await page.textContent("#inspector");
+            for (const t of L.inspectLane.has) check(`${tag}: lane inspector shows "${t}"`, body.includes(t));
+            for (const t of L.inspectLane.hasNot) check(`${tag}: lane inspector omits "${t}"`, !body.includes(t));
+            await page.keyboard.press("Escape");
+            await page.waitForFunction(() => !document.getElementById("inspector").open);
+            check(`${tag}: Escape returns focus to the lane button`, await btn.evaluate((n) => document.activeElement === n));
+          }
         }
         if (expect.noReviewerCharacters)
           check(`${tag}: no internal reviewer characters`, (await page.locator(".reviewer-character, .reviewer-pose").count()) === 0);

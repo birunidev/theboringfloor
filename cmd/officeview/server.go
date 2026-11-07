@@ -158,10 +158,15 @@ func (o *office) events(w http.ResponseWriter, r *http.Request) {
 	flusher.Flush()
 	ticker := time.NewTicker(o.poll)
 	defer ticker.Stop()
-	var identity string
-	var offset int64
-	var historyUntil int64
-	var previous os.FileInfo
+	// One tail per followed log (status.json's log and each lane's log), so a
+	// problem with one lane's file never silences or replays another.
+	type tail struct {
+		identity     string
+		offset       int64
+		historyUntil int64
+		previous     os.FileInfo
+	}
+	tails := map[string]*tail{}
 	lastError := ""
 	pump := func() bool {
 		root, err := os.OpenRoot(o.home)
@@ -173,47 +178,62 @@ func (o *office) events(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return streamError(w, flusher, &lastError, "Status unavailable")
 		}
-		if st.LogPath == "" {
-			if lastError != "" {
-				fmt.Fprint(w, "event: telemetry-ready\ndata: {}\n\n")
-				flusher.Flush()
-				lastError = ""
+		sources := o.logSources(root, st)
+		active := map[string]bool{}
+		failed := false
+		for _, src := range sources {
+			active[src.Path] = true
+			f, id, err := o.openLog(root, src.Path)
+			if err != nil {
+				failed = true
+				continue
 			}
-			return true
+			info, err := f.Stat()
+			if err != nil {
+				f.Close()
+				continue
+			}
+			t := tails[src.Path]
+			if t == nil {
+				t = &tail{}
+				tails[src.Path] = t
+			}
+			history := t.identity != id || t.previous == nil || !os.SameFile(t.previous, info) || info.Size() < t.offset
+			if history {
+				t.identity = id
+				t.offset = 0
+				t.historyUntil = info.Size()
+			}
+			t.previous = info
+			rows, next, err := readEvents(f, t.identity, t.offset, 500)
+			f.Close()
+			if err != nil {
+				failed = true
+				continue
+			}
+			t.offset = next
+			for _, row := range rows {
+				parts := strings.Split(row.ID, ":")
+				start, _ := strconv.ParseInt(parts[1], 10, 64)
+				row.History = start < t.historyUntil
+				row.Lane = src.Lane
+				b, _ := json.Marshal(row)
+				if _, err := fmt.Fprintf(w, "id: %s\nevent: log\ndata: %s\n\n", row.ID, b); err != nil {
+					return false
+				}
+			}
 		}
-		f, id, err := o.openLog(root, st.LogPath)
-		if err != nil {
-			return streamError(w, flusher, &lastError, "Activity unavailable")
+		for path := range tails {
+			if !active[path] {
+				delete(tails, path)
+			}
 		}
-		defer f.Close()
-		info, err := f.Stat()
-		if err != nil {
-			return true
-		}
-		history := identity != id || previous == nil || !os.SameFile(previous, info) || info.Size() < offset
-		if history {
-			identity = id
-			offset = 0
-			historyUntil = info.Size()
-		}
-		previous = info
-		rows, next, err := readEvents(f, identity, offset, 500)
-		if err != nil {
+		if failed {
 			return streamError(w, flusher, &lastError, "Activity unavailable")
 		}
 		if lastError != "" {
 			fmt.Fprint(w, "event: telemetry-ready\ndata: {}\n\n")
-		}
-		lastError = ""
-		offset = next
-		for _, row := range rows {
-			parts := strings.Split(row.ID, ":")
-			start, _ := strconv.ParseInt(parts[1], 10, 64)
-			row.History = start < historyUntil
-			b, _ := json.Marshal(row)
-			if _, err := fmt.Fprintf(w, "id: %s\nevent: log\ndata: %s\n\n", row.ID, b); err != nil {
-				return false
-			}
+			lastError = ""
 		}
 		flusher.Flush()
 		return true

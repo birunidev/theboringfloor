@@ -1036,3 +1036,77 @@ dialog.inspector {
     display: none !important;
   }
 }
+
+/* Parallel lanes (workers.json): one static worker per reported lane. */
+#stations.lane-mode #worker {
+  display: none;
+}
+#lane-workers {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 2;
+}
+.lane-worker {
+  position: absolute;
+  width: 40px;
+  height: 48px;
+  transform: translate(-20px, -48px);
+}
+.lane-worker svg {
+  width: 40px;
+  height: 48px;
+}
+.lane-tag {
+  position: absolute;
+  top: 50px;
+  left: 50%;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.5;
+  padding: 0 6px;
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--accent);
+  border: 1px solid var(--accent);
+}
+@media (max-width: 1099px) {
+  /* The strip, lane list and desk badges name each lane at this width. */
+  .lane-tag {
+    display: none;
+  }
+}
+.lane-list {
+  list-style: none;
+  padding: 0;
+  margin: 8px 0 0;
+  display: grid;
+  gap: 12px;
+}
+.lane-row {
+  display: grid;
+  gap: 4px;
+  justify-items: start;
+}
+.lane-name,
+.lane-key {
+  font:
+    700 14px ui-monospace,
+    SFMono-Regular,
+    Consolas,
+    "Liberation Mono",
+    monospace;
+  overflow-wrap: anywhere;
+}
+.lane-name {
+  color: var(--muted);
+}
+.lane-row button {
+  min-height: 44px;
+}
+.lane-row > p.meta {
+  font: 400 14px/1.5 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  color: var(--muted);
+}

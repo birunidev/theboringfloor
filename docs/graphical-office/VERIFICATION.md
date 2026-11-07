@@ -272,3 +272,24 @@ lanes, but the current runtime exposes one `status.json` and executes one card a
 a time. This PR does not simulate lane concurrency. Parallel frontend/backend
 execution requires a separate engine/status contract and must preserve per-card
 worktrees, the shared token budget, STOP and claim safety.
+
+## Parallel lanes: verification (7 Nov 2026)
+
+No real `workers.json` run has been observed: every autopilot run so far was
+single-lane and no `workers.json` exists on the founder's machine. All lane
+fixtures are TEST DATA and are written to match what `Engine.persistStatusesLocked`
+produces. The contract was also checked against the real writers (below).
+
+```sh
+go vet ./cmd/officeview && go test -race -count=1 ./cmd/officeview ./internal/autopilot/...
+PLAYWRIGHT_MODULE=/tmp/officeview-browser/node_modules/playwright/index.mjs \
+OFFICEVIEW=/tmp/officeview-browser/officeview OUT=docs/graphical-office/evidence \
+  node cmd/officeview/office-proof.mjs     # 422 checks, 44 screenshots, ALL CHECKS PASSED
+```
+
+- Go: new tests cover the pairing rule (six unpaired cases), strict parse (seven malformed files), lane logs with per-lane labels, SSE following every lane log, a lane log outside the autopilot home refused while the good lane still works, per-lane card usage, and no finished-history while lanes run. Mutation check: forcing the pairing rule to "usable" makes the stale-lane test fail.
+- Contract check against `main`'s real `runstate.WriteWorkers` and `WriteStatus` (scratch test on a tree merged with `main`, written in `persistStatusesLocked` order with one timestamp): two lanes accepted, one mirrored lane accepted, idle with `workers: []` accepted, and the file correctly ignored after a later single-worker write.
+- Merged with `main` (6ee8584): 0 conflicts; `go vet` clean; `go test -race` passes for `cmd/officeview` and all 9 autopilot packages.
+- Browser fixtures (1440 and 390, light and dark): two lanes at different desks, two lanes sharing a desk (labels stack, workers spaced), and unpaired `workers.json` (warning, no lanes). Asserts include exact desk badges, lane-prefixed activity, no "finished run history" label, per-lane usage, per-lane inspector (other lane omitted), focus return, no horizontal overflow and no external requests.
+
+Existing proofs re-run on the final code: `browser-proof.mjs` exit 0 (all lines PASS, no failures) and `contrast-proof.mjs` exit 0 (no FAIL).

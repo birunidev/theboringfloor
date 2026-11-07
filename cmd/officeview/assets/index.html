@@ -59,6 +59,10 @@
               <p id="full-title"></p>
             </details>
           </div>
+          <div id="lanes-panel" hidden>
+            <p class="meta">Parallel lanes · from workers.json</p>
+            <ul id="lane-list" class="lane-list"></ul>
+          </div>
           <p id="no-card">Card unavailable</p>
           <p id="round">Round unavailable</p>
           <p id="reported-tokens" class="meta">Reported tokens: Unavailable</p>
@@ -75,6 +79,7 @@
         </div>
         <div class="full status-notes">
           <p id="execution" class="banner warning" hidden></p>
+          <p id="lanes-warning" class="banner warning" hidden></p>
           <p id="error" class="banner danger" hidden></p>
           <p id="note" hidden></p>
           <p id="updated">Update time unavailable</p>
@@ -99,6 +104,7 @@
           >
             <path d="M0 112 H1344 M0 232 H1344 M0 352 H1344 M0 472 H1344" />
           </svg>
+          <div id="lane-workers" aria-hidden="true"></div>
           <div id="worker" aria-hidden="true">
             <span id="worker-tag" class="worker-tag" hidden></span>
           </div>

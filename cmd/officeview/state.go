@@ -33,6 +33,33 @@ type event struct {
 	ID      string    `json:"id"`
 	Native  rawObject `json:"native"`
 	History bool      `json:"history"`
+	// Lane names the workers.json lane whose log this record came from. Empty
+	// for the single-worker status.json log.
+	Lane string `json:"lane,omitempty"`
+}
+
+// laneSnap is one live lane from workers.json plus its own log's records.
+type laneSnap struct {
+	Lane         string  `json:"lane"`
+	Status       *status `json:"status"`
+	LogIdentity  string  `json:"logIdentity"`
+	Events       []event `json:"events"`
+	LogAvailable bool    `json:"logAvailable"`
+	LogError     string  `json:"logError"`
+	// CardTokens is usage.json's lifetime total for this lane's card (nil when
+	// unavailable). The card cap is in snapshot.CardCap.
+	CardTokens *int64 `json:"cardTokens"`
+}
+
+// workersSnap is workers.json as the office may use it. Usable is false when
+// the file is not provably the pair of the current status.json (Reason says
+// why); lanes are then not shown, never guessed.
+type workersSnap struct {
+	Version   int64      `json:"version"`
+	UpdatedAt string     `json:"updatedAt"`
+	Lanes     []laneSnap `json:"lanes"`
+	Usable    bool       `json:"usable"`
+	Reason    string     `json:"reason"`
 }
 type runInfo struct {
 	Card     string `json:"card"`
@@ -83,6 +110,10 @@ type snapshot struct {
 	TodayOutcomes []outcome `json:"todayOutcomes"`
 	OutcomesDay   string    `json:"outcomesDay"`
 	OutcomesError string    `json:"outcomesError"`
+	// Workers is nil when workers.json does not exist (no parallel-lane run
+	// has been recorded). WorkersError is set when it exists but is unreadable.
+	Workers      *workersSnap `json:"workers"`
+	WorkersError string       `json:"workersError"`
 }
 
 func str(m rawObject, key string) string { var s string; json.Unmarshal(m[key], &s); return s }
@@ -139,7 +170,160 @@ func readStatus(root *os.Root) (*status, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &status{State: str(m, "state"), Run: str(m, "run"), Card: str(m, "card"), Title: str(m, "title"), Stage: str(m, "stage"), Note: str(m, "note"), UpdatedAt: str(m, "updatedAt"), LogPath: str(m, "logPath"), Round: number(m, "round", false), Tokens: number(m, "tokens", true)}, nil
+	return statusFromObject(m), nil
+}
+
+func statusFromObject(m rawObject) *status {
+	return &status{State: str(m, "state"), Run: str(m, "run"), Card: str(m, "card"), Title: str(m, "title"), Stage: str(m, "stage"), Note: str(m, "note"), UpdatedAt: str(m, "updatedAt"), LogPath: str(m, "logPath"), Round: number(m, "round", false), Tokens: number(m, "tokens", true)}
+}
+
+const (
+	maxLanes    = 8
+	maxLaneName = 64
+	workersFile = "workers.json" // written by internal/autopilot/runstate (WriteWorkers)
+)
+
+type laneRaw struct {
+	name string
+	st   *status
+}
+
+// parseWorkers validates workers.json strictly: version 1, a workers array,
+// unique non-empty lane names, bounded count.
+func parseWorkers(m rawObject) (string, []laneRaw, error) {
+	if v := number(m, "version", true); v == nil || *v != 1 {
+		return "", nil, fmt.Errorf("unsupported workers.json version")
+	}
+	var entries []rawObject
+	if string(m["workers"]) == "" || string(m["workers"]) == "null" || json.Unmarshal(m["workers"], &entries) != nil {
+		return "", nil, fmt.Errorf("workers is not an array")
+	}
+	if len(entries) > maxLanes {
+		return "", nil, fmt.Errorf("too many lanes")
+	}
+	seen := map[string]bool{}
+	var lanes []laneRaw
+	for _, e := range entries {
+		name := str(e, "lane")
+		if name == "" || len(name) > maxLaneName || seen[name] {
+			return "", nil, fmt.Errorf("invalid or duplicate lane name")
+		}
+		seen[name] = true
+		lanes = append(lanes, laneRaw{name: name, st: statusFromObject(e)})
+	}
+	return str(m, "updatedAt"), lanes, nil
+}
+
+// workersUsable decides whether workers.json is the pair of the current
+// status.json. The engine writes both in one call with the same timestamp
+// (Engine.persistStatusesLocked), so equal times prove they belong together.
+// A single-worker run writes only status.json, which makes an older
+// workers.json stale; a crash can leave one behind. Neither may be shown.
+func workersUsable(updatedAt string, lanes []laneRaw, st *status) (bool, string) {
+	if st == nil {
+		return false, "status.json is unavailable, so lane data cannot be confirmed"
+	}
+	wt, err1 := time.Parse(time.RFC3339, updatedAt)
+	stt, err2 := time.Parse(time.RFC3339, st.UpdatedAt)
+	if err1 != nil || err2 != nil {
+		return false, "update time unavailable in workers.json or status.json"
+	}
+	switch {
+	case wt.Before(stt):
+		return false, "workers.json is older than status.json (a later single-worker write); lane data ignored"
+	case wt.After(stt):
+		return false, "workers.json is newer than status.json (unpaired write); lane data ignored"
+	}
+	switch {
+	case len(lanes) == 0:
+		if st.State != "idle" {
+			return false, "workers.json lists no lanes but status.json is not idle"
+		}
+	case len(lanes) == 1:
+		l := lanes[0].st
+		if st.State != l.State || st.Run != l.Run || st.Card != l.Card {
+			return false, "status.json does not mirror the single lane in workers.json"
+		}
+	default:
+		if st.State != "running" || st.Card != "" {
+			return false, "status.json is not the multi-lane summary for workers.json"
+		}
+	}
+	return true, ""
+}
+
+// readWorkers loads workers.json and, when it is usable, each lane's own log.
+func (o *office) readWorkers(root *os.Root, st *status) (*workersSnap, string) {
+	m, err := readObject(root, workersFile)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, ""
+	}
+	if err != nil {
+		return nil, "Lane data unavailable"
+	}
+	updatedAt, lanes, err := parseWorkers(m)
+	if err != nil {
+		return nil, "Lane data unavailable"
+	}
+	w := &workersSnap{Version: 1, UpdatedAt: updatedAt, Lanes: []laneSnap{}}
+	w.Usable, w.Reason = workersUsable(updatedAt, lanes, st)
+	if !w.Usable {
+		return w, ""
+	}
+	for _, l := range lanes {
+		ls := laneSnap{Lane: l.name, Status: l.st, Events: []event{}}
+		if l.st.LogPath != "" {
+			f, identity, err := o.openLog(root, l.st.LogPath)
+			if err != nil {
+				ls.LogError = "Activity unavailable"
+			} else {
+				ls.LogIdentity = identity
+				evs, err := tailEvents(f, identity, 500)
+				f.Close()
+				if err != nil {
+					ls.LogError = "Activity unavailable"
+				} else {
+					ls.LogAvailable = true
+					for i := range evs {
+						evs[i].Lane = l.name
+					}
+					ls.Events = evs
+				}
+			}
+		}
+		w.Lanes = append(w.Lanes, ls)
+	}
+	return w, ""
+}
+
+// logSource is one run log the event stream follows.
+type logSource struct {
+	Lane string
+	Path string
+}
+
+// logSources lists the logs to follow: the status.json log plus every lane
+// log of a usable workers.json. A lane log that is also the status log is
+// followed once, labelled with its lane.
+func (o *office) logSources(root *os.Root, st *status) []logSource {
+	var out []logSource
+	seen := map[string]bool{}
+	if m, err := readObject(root, workersFile); err == nil {
+		if updatedAt, lanes, err := parseWorkers(m); err == nil {
+			if ok, _ := workersUsable(updatedAt, lanes, st); ok {
+				for _, l := range lanes {
+					if l.st.LogPath != "" && !seen[l.st.LogPath] {
+						seen[l.st.LogPath] = true
+						out = append(out, logSource{Lane: l.name, Path: l.st.LogPath})
+					}
+				}
+			}
+		}
+	}
+	if st != nil && st.LogPath != "" && !seen[st.LogPath] {
+		out = append(out, logSource{Path: st.LogPath})
+	}
+	return out
 }
 
 func (o *office) snapshot() snapshot {
@@ -188,6 +372,7 @@ func (o *office) snapshot() snapshot {
 	} else {
 		s.ConfigError = "Configuration unavailable"
 	}
+	var usageCards rawObject
 	u, err := readObject(root, "usage.json")
 	if err != nil {
 		s.UsageError = "Usage unavailable"
@@ -205,16 +390,25 @@ func (o *office) snapshot() snapshot {
 				s.Today = nil
 			}
 		}
-		if s.Status != nil && s.Status.State == "running" && s.Status.Card != "" {
-			var cards rawObject
-			if json.Unmarshal(u["cards"], &cards) == nil {
-				s.CardTokens = number(cards, s.Status.Card, true)
-			}
+		var cards rawObject
+		if json.Unmarshal(u["cards"], &cards) == nil {
+			usageCards = cards
+		}
+		if s.Status != nil && s.Status.State == "running" && s.Status.Card != "" && usageCards != nil {
+			s.CardTokens = number(usageCards, s.Status.Card, true)
 		}
 	}
 	s.Runs, err = recentRuns(root)
 	if err != nil {
 		s.RunsError = "Recent runs unavailable"
+	}
+	s.Workers, s.WorkersError = o.readWorkers(root, s.Status)
+	if s.Workers != nil && usageCards != nil {
+		for i := range s.Workers.Lanes {
+			if card := s.Workers.Lanes[i].Status.Card; card != "" {
+				s.Workers.Lanes[i].CardTokens = number(usageCards, card, true)
+			}
+		}
 	}
 	all, allErr := allRuns(root)
 	s.OutcomesDay = now.Format("2006-01-02")
@@ -223,7 +417,10 @@ func (o *office) snapshot() snapshot {
 	} else {
 		s.TodayOutcomes, s.OutcomesError = o.todayOutcomes(root, all, now)
 	}
-	if (s.Status == nil || s.Status.LogPath == "") && allErr == nil && len(all) > 0 {
+	// Finished-run history is for an idle office. While status.json says
+	// running (one worker without a log path, or several lanes) it would be
+	// presented as "finished" while work is live, so it is not offered.
+	if (s.Status == nil || (s.Status.LogPath == "" && s.Status.State != "running")) && allErr == nil && len(all) > 0 {
 		last := all[0]
 		s.LastRun = &last
 		f, identity, err := o.openLog(root, filepath.Join("runs", last.Card, last.Run+".jsonl"))
