@@ -76,7 +76,7 @@ Implement the card so every acceptance criterion is met, with tests where the re
 Hard rules:
 - Change ONLY files matching these scope paths: %s
 - Never touch .env or secret files, CI workflows, lockfiles you did not need, or anything outside the worktree.
-- Do NOT commit, push, open PRs, deploy, or change the board. The autopilot does that after independent review.
+- Do NOT commit, push, open PRs, deploy, or change the board. The autopilot publishes a draft PR for external human review.
 - Shell access is limited to read-only git commands (git status, git diff, git log, ls); a rejected command is final, do not try to work around it.
 - You cannot run tests yourself. After your turn the autopilot runs these checks in a sandbox and sends you any failures: %s
 
@@ -100,77 +100,6 @@ func FixPrompt(round int, findings []Finding) string {
 		fmt.Fprintf(&b, "- [%s] %s %s\n", f.Severity, loc, f.Issue)
 	}
 	return b.String()
-}
-
-// Reviewer names.
-const (
-	ReviewerAC     = "acceptance-criteria"
-	ReviewerChecks = "tests-lint-build"
-	ReviewerScope  = "diff-scope"
-)
-
-// ReviewInput is what reviewers see: requirements and evidence, never the
-// implementer's transcript.
-type ReviewInput struct {
-	Card     CardContext
-	Pre      Preflight
-	Files    []string
-	Diff     string
-	Checks   []CheckResult
-	Round    int
-	Previous []Finding // last round's findings, to confirm they were fixed
-}
-
-const verdictSchema = `Schema:
-{"verdict": "pass" | "fail",
- "findings": [{"severity": "blocker" | "major" | "minor", "file": "path", "line": 0, "issue": "what is wrong and why"}],
- "summary": "one sentence"}
-A "fail" needs at least one finding; a "pass" may only carry minor findings. Do not report style or taste.`
-
-func diffBlock(d string) string {
-	if len(d) > maxDiffChars {
-		d = d[:maxDiffChars] + "\n[diff truncated by the autopilot]"
-	}
-	return fence("DIFF", d)
-}
-
-// ReviewPrompt builds one independent reviewer prompt.
-func ReviewPrompt(reviewer string, in ReviewInput) string {
-	var focus string
-	switch reviewer {
-	case ReviewerAC:
-		focus = "Check every acceptance criterion against the diff. Each criterion not clearly met by the change is a blocker. Read repository files if you need context."
-	case ReviewerChecks:
-		focus = "Judge the verification. The CHECKS block is real command output from the autopilot. Fail if any check failed, if behavior changed without a test where the repository has tests, or if tests were weakened, skipped or deleted to make checks pass."
-	case ReviewerScope:
-		focus = "Judge the diff scope. Fail on changes unrelated to the card, files outside the scope paths, leaked secrets or credentials, debug leftovers, or risky edits (auth, migrations, CI, deploy config) the card did not ask for."
-	}
-	var checks strings.Builder
-	for _, c := range in.Checks {
-		status := "PASS"
-		if !c.Passed {
-			status = "FAIL"
-		}
-		fmt.Fprintf(&checks, "$ %s   [%s, exit %d]\n%s\n\n", c.Cmd, status, c.ExitCode, tail(c.Output, 4000))
-	}
-	prev := ""
-	if len(in.Previous) > 0 {
-		prev = fence("PREVIOUS_ROUND_FINDINGS", FixPrompt(in.Round-1, in.Previous))
-	}
-	return fmt.Sprintf(`You are the independent %s REVIEWER (round %d) for an unattended coding autopilot in %s. You did not write this change. Do not modify any file.
-%s
-
-Acceptance criteria:
-%s
-Scope paths: %s
-Changed files: %s
-
-%s
-%s
-%s%s%s`, strings.ToUpper(reviewer), in.Round, in.Card.Repo, focus,
-		bullets(in.Pre.AcceptanceCriteria), strings.Join(in.Pre.ScopePaths, ", "), strings.Join(in.Files, ", "),
-		verdictSchema, jsonOnly,
-		fence("CHECKS", checks.String()), diffBlock(in.Diff), prev)
 }
 
 func bullets(xs []string) string {

@@ -26,7 +26,7 @@ func (f ApproverFunc) Decide(r PermissionRequest) Decision { return f(r) }
 
 // TurnEvent is reported to TurnSpec.OnEvent for the run log.
 type TurnEvent struct {
-	Kind     string // "permission", "tokens", "interrupt"
+	Kind     string // "permission", "tokens", "interrupt", "note"
 	Request  *PermissionRequest
 	Decision *Decision
 	Tokens   *Tokens
@@ -120,6 +120,12 @@ func (c *Client) RunTurn(ctx context.Context, spec TurnSpec) (TurnResult, error)
 			}
 			emit(TurnEvent{Kind: "permission", Request: &r, Decision: &d})
 			if err := c.Reply(ctx, spec.SessionID, r.ID, decision, d.Reason); err != nil && ctx.Err() == nil {
+				if IsNotFound(err) {
+					// The request vanished between listing and replying (its
+					// turn already ended). Nothing was approved; keep going.
+					emit(TurnEvent{Kind: "note", Note: fmt.Sprintf("permission %s no longer pending (http 404); skipped", r.ID)})
+					continue
+				}
 				return interrupt(fmt.Errorf("reply permission %s: %w", r.ID, err))
 			}
 		}

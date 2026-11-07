@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"strings"
@@ -64,6 +65,12 @@ func (c CmdChecker) Run(ctx context.Context) ([]pipeline.CheckResult, error) {
 		case err == nil:
 		case errors.As(err, &ee):
 			r.ExitCode = ee.ExitCode()
+			for _, ok := range ch.AllowExit {
+				if ok == r.ExitCode {
+					r.Passed = true
+					r.Note = fmt.Sprintf("exit %d accepted (configured)", r.ExitCode)
+				}
+			}
 		default:
 			r.ExitCode = -1
 			r.Output = strings.TrimSpace(r.Output + "\n" + err.Error())
@@ -88,3 +95,7 @@ func (w WTWorkspace) ChangedFiles(ctx context.Context) ([]string, error) {
 }
 
 func (w WTWorkspace) Diff(ctx context.Context) (string, error) { return worktree.Diff(ctx, w.WT) }
+
+func (w WTWorkspace) DiffCheck(ctx context.Context) (string, bool, error) {
+	return worktree.DiffCheck(ctx, w.WT)
+}

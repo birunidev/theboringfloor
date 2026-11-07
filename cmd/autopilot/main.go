@@ -228,14 +228,15 @@ func indent(s, p string) string {
 // gitPublisher commits, pushes the autopilot branch and opens a draft PR.
 type gitPublisher struct{}
 
-func (gitPublisher) Publish(ctx context.Context, dir, branch, base, msg, title, body string) (string, error) {
+func (gitPublisher) Publish(ctx context.Context, dir, branch, base, msg, title, body string) (string, string, error) {
 	t := publish.Target{Dir: dir, Branch: branch, Base: base}
-	if _, _, err := publish.Commit(ctx, t, msg); err != nil {
-		return "", err
+	head, _, err := publish.Commit(ctx, t, msg)
+	if err != nil {
+		return "", "", err
 	}
 	if err := publish.Push(ctx, t); err != nil {
-		return "", err
+		return "", "", err
 	}
 	url, _, err := publish.DraftPR(ctx, t, title, body)
-	return url, err
+	return url, head, err
 }

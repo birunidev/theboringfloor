@@ -316,3 +316,39 @@ func TestParseModel(t *testing.T) {
 		t.Fatal("want error")
 	}
 }
+
+func TestRunTurnToleratesVanishedPermission(t *testing.T) {
+	f, srv := newFake(t)
+	f.gone = map[string]bool{"p-gone": true}
+	f.queue = []PermissionRequest{
+		{ID: "p-gone", Action: "read", Resources: []string{"a"}},
+		{ID: "p-ok", Action: "read", Resources: []string{"b"}},
+	}
+	var notes []string
+	c := NewClient(srv.URL, "pw")
+	res, err := c.RunTurn(context.Background(), TurnSpec{SessionID: "ses_1", Text: "go", Poll: time.Millisecond,
+		Approver: ApproverFunc(func(PermissionRequest) Decision { return Decision{} }),
+		OnEvent: func(e TurnEvent) {
+			if e.Kind == "note" {
+				notes = append(notes, e.Note)
+			}
+		}})
+	if err != nil {
+		t.Fatalf("a vanished permission request must not abort the turn: %v", err)
+	}
+	if res.Outcome != "succeeded" || f.replies["p-ok"] != "reject" || f.interrupts != 0 {
+		t.Fatalf("res=%+v replies=%v interrupts=%d", res, f.replies, f.interrupts)
+	}
+	if len(notes) != 1 || !strings.Contains(notes[0], "p-gone") {
+		t.Fatalf("notes = %v", notes)
+	}
+}
+
+func TestOtherReplyErrorsStillAbort(t *testing.T) {
+	if IsNotFound(errors.New("http 404 in text only")) {
+		t.Fatal("only a typed 404 may be tolerated")
+	}
+	if !IsNotFound(&HTTPError{Status: 404}) || IsNotFound(&HTTPError{Status: 500}) {
+		t.Fatal("IsNotFound misclassifies")
+	}
+}

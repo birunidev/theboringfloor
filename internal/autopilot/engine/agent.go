@@ -39,8 +39,6 @@ func (a *OCAgent) policy(role pipeline.Role) *ocv2.Policy {
 		// them, inside the bwrap sandbox. The implementer gets read-only git.
 		p.Bash = append(p.Bash, a.Cfg.ExtraBash...)
 		p.Bash = append(p.Bash, "git status", "git diff", "git log", "ls")
-	case pipeline.RoleReview:
-		// Read-only, no Space, no shell.
 	}
 	return p
 }
@@ -73,6 +71,9 @@ func (a *OCAgent) Run(ctx context.Context, req pipeline.StageRequest) (pipeline.
 			if e.Kind == "permission" {
 				a.logEvent(runstate.Event{Kind: "permission", Stage: req.Name, Msg: e.Decision.Reason,
 					Data: map[string]any{"action": e.Request.Action, "resources": e.Request.Resources, "allow": e.Decision.Allow}})
+			}
+			if e.Kind == "note" {
+				a.logEvent(runstate.Event{Kind: "note", Stage: req.Name, Msg: e.Note})
 			}
 			if e.Kind == "interrupt" {
 				a.logEvent(runstate.Event{Kind: "error", Stage: req.Name, Msg: "interrupted: " + e.Note})

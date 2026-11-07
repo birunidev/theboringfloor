@@ -51,6 +51,8 @@ boards. Say so instead of pretending.
 | #10 | `engine` | Checks run in **bubblewrap**: fs read-only, `$HOME` = empty tmpfs, only worktree writable + configured read-only paths, no network. Implementer can no longer run checks itself |
 | #11 | `handoff`, `pipeline` | Standardized **`[AUTOPILOT REVIEW PACKET v1`** comment (incl. diff) for cards in Review; prompts honor `[CHATGPT REVIEW v1]` REQUEST_CHANGES findings |
 
+**Review is outside the autopilot (founder decision, 7 Nov 2026).** The autopilot only runs the coding sprint: pre-flight → implement → sandboxed checks + deterministic gates (scope, sensitive/CI files, empty diff, "files but no diff", `git diff --check`) → up to 3 fix rounds → draft PR + `[AUTOPILOT REVIEW PACKET v1` evidence (base/head SHA, full diff incl. new files, check output tails redacted, diff --check). The reviewer agents were removed; the founder/ChatGPT/CTO review on the board and send `REQUEST_CHANGES` back to Autopilot Queue. Checks run with `--clearenv`; `allow_exit` per check (pytest exit 5 = no tests collected).
+
 Commands (from repo root):
 ```sh
 ./bin/autopilot --dry-run [--board "V2 Engineering"] [--card BII-123]   # pre-flight only; board writes disabled

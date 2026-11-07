@@ -112,3 +112,32 @@ func TestSandboxFailingCheckIsReported(t *testing.T) {
 		t.Fatalf("ok=%v out=%q", ok, out)
 	}
 }
+
+func TestSandboxClearsEnvironment(t *testing.T) {
+	needBwrap(t)
+	_, wt, _ := homeDirs(t)
+	t.Setenv("GITHUB_TOKEN", "ghp_SHOULD_NOT_LEAK_0123456789")
+	out, ok := runIn(t, Sandbox{Worktree: wt}, "env")
+	if !ok || strings.Contains(out, "SHOULD_NOT_LEAK") || !strings.Contains(out, "CI=1") {
+		t.Fatalf("environment not cleared (ok=%v):\n%s", ok, out)
+	}
+}
+
+func TestAllowExitIsNotedAsPass(t *testing.T) {
+	needBwrap(t)
+	_, wt, _ := homeDirs(t)
+	sb := Sandbox{Worktree: wt}
+	res, err := CmdChecker{Dir: wt, Sandbox: &sb, Checks: []Check{
+		{Name: "no tests", Argv: []string{"sh", "-c", "exit 5"}, AllowExit: []int{5}},
+		{Name: "real fail", Argv: []string{"sh", "-c", "exit 1"}, AllowExit: []int{5}},
+	}}.Run(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res[0].Passed || res[0].ExitCode != 5 || res[0].Note != "exit 5 accepted (configured)" {
+		t.Fatalf("allowed exit: %+v", res[0])
+	}
+	if res[1].Passed {
+		t.Fatalf("non-allowed exit passed: %+v", res[1])
+	}
+}
