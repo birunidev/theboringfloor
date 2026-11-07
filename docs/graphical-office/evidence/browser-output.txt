@@ -1,0 +1,18 @@
+1440/light/auto: layout, labels, controls, network, screenshot PASS
+1440/light/reduced: layout, labels, controls, network, screenshot PASS
+1440/dark/auto: layout, labels, controls, network, screenshot PASS
+1440/dark/reduced: layout, labels, controls, network, screenshot PASS
+390/light/auto: layout, labels, controls, network, screenshot PASS
+390/light/reduced: layout, labels, controls, network, screenshot PASS
+390/dark/auto: layout, labels, controls, network, screenshot PASS
+390/dark/reduced: layout, labels, controls, network, screenshot PASS
+1440/light: 19 evidence-state captures PASS
+1440/dark: 19 evidence-state captures PASS
+390/light: 19 evidence-state captures PASS
+390/dark: 19 evidence-state captures PASS
+Controls: cancel focus, focus trap, Escape, STOP set/readback, resume/readback PASS
+Disclosures/history, persisted preferences, 320/640/900/1099px, 200% zoom, escaped XSS, last-known disconnected state PASS
+Real-file stage change: 700ms aisle travel, finite arrival pose, no replay on load/identical polls, idle static, rejection not terminal PASS
+Reduced-motion live stage change uses frame 0; failed STOP write keeps previous state PASS
+New confirmed snapshot clears the earlier error condition while preserving the reported stage PASS
+Screenshots saved to /home/birunidev/Documents/projects/theboringfloor/docs/graphical-office/evidence

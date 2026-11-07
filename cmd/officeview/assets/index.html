@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="office-token" content="{{.Token}}" />
+    <title>Graphical Office · Coding autopilot</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="/assets/style.css" />
+    <script src="/assets/app.js" defer></script>
+  </head>
+  <body>
+    <a class="skip" href="#summary">Skip to current status</a>
+    <svg id="atlas" width="0" height="0" aria-hidden="true"><defs></defs></svg>
+    <header>
+      <div>
+        <h1>Graphical Office</h1>
+        <p>Coding autopilot</p>
+      </div>
+      <div class="preferences">
+        <label
+          >Theme
+          <select id="theme">
+            <option value="system">System</option>
+            <option value="light">Light</option>
+            <option value="dark">Dark</option>
+          </select></label
+        >
+        <label
+          >Motion
+          <select id="motion">
+            <option value="auto">Auto</option>
+            <option value="off">Off</option>
+          </select></label
+        >
+      </div>
+    </header>
+    <main>
+      <p id="test-label" class="banner warning" hidden>TEST DATA</p>
+      <section
+        id="summary"
+        class="hud panel"
+        aria-label="Autopilot status"
+        tabindex="-1"
+      >
+        <div id="connection" class="banner warning full">
+          Waiting for status
+        </div>
+        <div class="current">
+          <h2>Current card</h2>
+          <p id="state-label" class="badge">? Unknown</p>
+          <p id="stage" class="stage">Waiting for status</p>
+          <div id="card" class="card-chip" hidden>
+            <span class="badge working">● Active</span>
+            <p id="card-key"></p>
+            <p id="card-title" class="clamped">Title unavailable</p>
+            <details id="title-disclosure">
+              <summary>Show full title</summary>
+              <p id="full-title"></p>
+            </details>
+          </div>
+          <p id="no-card">Card unavailable</p>
+          <p id="round">Round unavailable</p>
+          <p id="reported-tokens" class="meta">Reported tokens: Unavailable</p>
+        </div>
+        <div id="daily-meter" class="budget"></div>
+        <div id="card-meter" class="budget"></div>
+        <div class="kill">
+          <h2>Kill switch</h2>
+          <p id="stop-label">Stop state unavailable</p>
+          <button id="control" disabled>Control unavailable</button>
+          <p id="control-reason" class="meta">Loading…</p>
+          <p>This control changes STOP only.</p>
+          <p id="control-feedback" role="alert"></p>
+        </div>
+        <div class="full status-notes">
+          <p id="execution" class="banner warning" hidden></p>
+          <p id="error" class="banner danger" hidden></p>
+          <p id="note" hidden></p>
+          <p id="updated">Update time unavailable</p>
+          <details>
+            <summary>Telemetry details</summary>
+            <pre id="status-details"></pre>
+          </details>
+        </div>
+      </section>
+      <section class="floor panel" aria-labelledby="office-heading">
+        <h2 id="office-heading">Office</h2>
+        <div id="stations">
+          <svg
+            class="aisles"
+            aria-hidden="true"
+            viewBox="0 0 1344 480"
+            preserveAspectRatio="none"
+          >
+            <path d="M0 112 H1344 M0 232 H1344 M0 352 H1344 M0 472 H1344" />
+          </svg>
+          <div id="worker" aria-hidden="true"></div>
+        </div>
+      </section>
+      <section class="outcomes" aria-labelledby="outcomes-heading">
+        <h2 id="outcomes-heading">Outcomes</h2>
+        <div id="shelves"></div>
+      </section>
+      <section class="activity panel" aria-labelledby="activity-heading">
+        <h2 id="activity-heading">Activity</h2>
+        <p id="activity-status">Activity unavailable</p>
+        <ol id="events"></ol>
+        <button id="older" hidden>Show older events</button>
+      </section>
+      <details class="panel source-details">
+        <summary>Configured boards and recent runs</summary>
+        <p id="boards">Unavailable</p>
+        <ul id="recent-runs"></ul>
+        <p id="runs-error"></p>
+      </details>
+    </main>
+    <div
+      id="announcements"
+      class="sr-only"
+      aria-live="polite"
+      aria-atomic="true"
+    ></div>
+    <dialog id="confirm" aria-labelledby="confirm-heading">
+      <h2 id="confirm-heading"></h2>
+      <p id="confirm-body"></p>
+      <p>This control changes STOP only.</p>
+      <div class="dialog-actions">
+        <button id="cancel" autofocus>Cancel</button
+        ><button id="confirm-action"></button>
+      </div>
+    </dialog>
+  </body>
+</html>
