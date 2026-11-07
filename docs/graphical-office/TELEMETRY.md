@@ -123,3 +123,49 @@ workers.json"). Each lane's card, stage, round and log path exist only in
 
 Still Unknown: checks, guardrail results, per-lane queue, failure reasons. They
 need the instrumentation PR.
+
+## Clarification context from pre-flight
+
+The old end event used only a generic summary such as "card is not ready to
+implement; no code was changed". The engine's pre-flight result already contains
+`summary`, `policy_block`, `questions`, and `chatgpt_prompt`. The board's
+`[AUTOPILOT NEEDS CLARIFICATION]` comment remains the authoritative place to
+answer the questions and request another attempt.
+
+For **new** `end` events with `data.kind = "needs-clarification"`, the engine
+additionally emits:
+
+```json
+{
+  "data": {
+    "kind": "needs-clarification",
+    "summary": "card is not ready to implement; no code was changed",
+    "clarification": {
+      "summary": "Source approval is missing",
+      "policyBlock": "BII-638 requires a per-file decision",
+      "questions": ["Which Core paths are approved for clean-room reauthoring?"]
+    }
+  }
+}
+```
+
+Those sample values illustrate the schema, not a real completed run. The event
+uses exactly the agent's own pre-flight fields, normalized and bounded:
+500 Unicode code points for the summary, 600 for the policy blocker, and up to
+eight questions of 350 each. It **never** emits the full `chatgpt_prompt`,
+card description, environment variables or secrets for the office to render.
+
+The local office's Needs Clarification shelf shows **why it stopped**, the exact
+reported policy blocker, numbered questions, and the producing run/card, using
+text-only DOM APIs (no HTML interpretation). These are marked *Pre-flight
+reported*, not Founder-verified rulings or a live board-list feed. For older
+end events without `data.clarification`, or malformed fields, the shelf says
+the details were not recorded and directs the founder to the actual card
+comment. It must not invent a question from the generic summary, fetch
+arbitrary files or claim a hold has been lifted.
+
+This is explanatory telemetry only. It does not change readiness decisions,
+Space permissions, the STOP switch, token budgets, existing board comments,
+queue selection, or moving cards to Review/Done. Real browser screenshots and
+final Go/JS test outcomes must be captured from the merged code; test fixtures
+alone are not proof of a live blocked card.
