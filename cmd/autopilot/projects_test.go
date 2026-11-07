@@ -85,6 +85,17 @@ func TestProjectAddPreviewSaveAndRunPlans(t *testing.T) {
 		if err != nil || !reflect.DeepEqual(plan, tc.want) {
 			t.Fatalf("plan %v: %v %v", tc.args, plan, err)
 		}
+		if !strings.Contains(out.String(), "UI: http://127.0.0.1:8080 (officeview must be running separately)") {
+			t.Fatalf("missing UI address: %s", out.String())
+		}
+	}
+	if _, err := call("run", "example", "--ui-port", "9090"); err != nil || !strings.Contains(out.String(), "http://127.0.0.1:9090") {
+		t.Fatalf("custom UI port: %v %s", err, out.String())
+	}
+	for _, port := range []string{"0", "-1", "65536"} {
+		if _, err := call("run", "example", "--ui-port", port); err == nil {
+			t.Fatalf("accepted invalid UI port %s", port)
+		}
 	}
 	if _, err := call("list"); err != nil || !strings.Contains(out.String(), "example") {
 		t.Fatal("list failed")

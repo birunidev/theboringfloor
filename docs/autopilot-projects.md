@@ -23,6 +23,13 @@ All projects share one worker lock, STOP switch, daily token budget and status
 file. `all` processes configured boards through the existing worker loop; it
 does not start parallel workers. Existing stop/resume/status commands still work.
 
+Each `project run` prints `UI: http://127.0.0.1:8080`. This is the address of
+the separately running officeview UI; the worker does not launch it or probe its
+availability. If officeview uses another port, pass `--ui-port 9090` to print
+the matching address. On the local checkout with the UI installed, start it in
+another terminal using `task ui` (default 8080), or
+`task ui UI_BIND=127.0.0.1:9090` for that custom port.
+
 ## Register another project
 
 A project can live anywhere, including `~/Documents/projects`. It needs an

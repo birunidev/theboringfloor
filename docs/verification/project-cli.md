@@ -71,3 +71,22 @@ GitHub authentication, sandbox dependency completeness or card authorization.
 Space OAuth may refresh through the existing client. Projects requiring setup
 commands still configure those explicitly in JSON. CLI-only change; no visual
 assets or UI styles changed.
+
+## UI address follow-up
+
+`project run` now prints `UI: http://127.0.0.1:8080 (officeview must be running separately)`.
+`--ui-port` selects a custom port and rejects values outside 1..65535.
+Tests assert default/custom URL output for run plans and invalid-port rejection.
+
+Using the bubblewrap command above with
+`go vet ./cmd/autopilot/ && go test -race -count=1 ./cmd/autopilot/`
+exited 0; vet was silent, actual test output:
+
+```text
+ok  github.com/theboringhumane/theboringfloor/cmd/autopilot  1.104s
+```
+
+Preview binary rebuilt successfully; `project help` displays the new option.
+`git diff --check` exited 0 without output. A sandbox-local curl probe could not
+connect to port 8080 (HTTP 000); no claim is made that a UI server is running.
+Printing the URL does not start the UI or verify availability.

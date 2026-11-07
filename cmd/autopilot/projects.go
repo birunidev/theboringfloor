@@ -30,8 +30,8 @@ const projectHelp = `Usage:
   autopilot project list
   autopilot project add NAME --repo PATH --board BOARD_ID --base BRANCH --check '["program","arg"]'
   autopilot project check NAME
-  autopilot project run NAME [--live] [--once] [--card CARD]
-  autopilot project run all [--live] [--once]
+  autopilot project run NAME [--live] [--once] [--card CARD] [--ui-port 8080]
+  autopilot project run all [--live] [--once] [--ui-port 8080]
 
 Repeat --check for each sandboxed verification command and --policy for READ_FIRST cards.
 Add also accepts --read-only dependency paths, --queue, --working, --review,
@@ -42,6 +42,7 @@ Existing project names, repository names and board IDs work without migration.
 check only validates Git/board metadata and dependencies; it does not approve work.
 run defaults to model pre-flight only (may spend tokens); --live permits card work.
 All runs share the existing single-instance lock, token ledger, STOP and policies.
+run prints the UI address (default port 8080); start officeview separately.
 `
 
 // Returns legacy worker flags only for run. Registration and metadata checks
@@ -74,6 +75,7 @@ func projectCommand(ctx context.Context, paths runstate.Paths, args []string, ou
 	var checks, policy, readOnly repeated
 	var preview, live, once bool
 	var card string
+	var uiPort int
 	if command == "add" {
 		fs.StringVar(&repo, "repo", "", "existing repository root")
 		fs.StringVar(&boardID, "board", "", "Birunidev Space board ID")
@@ -89,6 +91,7 @@ func projectCommand(ctx context.Context, paths runstate.Paths, args []string, ou
 		fs.BoolVar(&preview, "preview", false, "validate mapping without saving it")
 	}
 	if command == "run" {
+		fs.IntVar(&uiPort, "ui-port", 8080, "port of the separately running localhost officeview UI")
 		fs.BoolVar(&live, "live", false, "allow board writes, commits, push and draft PRs")
 		fs.BoolVar(&once, "once", false, "live: process at most one card")
 		fs.StringVar(&card, "card", "", "pre-flight: inspect this card only")
@@ -104,6 +107,9 @@ func projectCommand(ctx context.Context, paths runstate.Paths, args []string, ou
 	}
 	if command == "run" && ((once && !live) || (live && card != "") || (name == "all" && card != "")) {
 		return nil, errors.New("--once requires --live; --card requires pre-flight for one named project")
+	}
+	if command == "run" && (uiPort < 1 || uiPort > 65535) {
+		return nil, errors.New("--ui-port must be between 1 and 65535")
 	}
 	doc, err := projects.Load(*configPath)
 	if err != nil {
@@ -217,6 +223,7 @@ func projectCommand(ctx context.Context, paths runstate.Paths, args []string, ou
 	if card != "" {
 		workerArgs = append(workerArgs, "--card", card)
 	}
+	fmt.Fprintf(out, "UI: http://127.0.0.1:%d (officeview must be running separately)\n", uiPort)
 	return workerArgs, nil
 }
 
