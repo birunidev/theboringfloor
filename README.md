@@ -280,6 +280,25 @@ Browser tab (the left pane, behind `ctrl+b`):
 
 On kitty/ghostty with Chrome, pages render as headless screenshots — ` shot ` badge, PNGs under `~/.theboringfloor/shots/` — and the boss can screenshot pages for you, snapshot pages to read for itself, and (with your approve-once permission) click, fill and eval on them. Pastes into the terminal tab reach the shell bracketed-paste-wrapped. Everywhere else the browser is text on purpose.
 
+## Autopilot (local)
+
+The graphical office monitors local autopilot telemetry without starting an
+agent or changing board cards:
+
+```sh
+go run ./cmd/officeview
+```
+
+Open the printed `http://127.0.0.1:<port>` address. All assets are embedded;
+the page makes no external requests. It reads `~/.theboringfloor/autopilot`
+(or `THEFLOOR_AUTOPILOT_HOME`) and shows unknown values when evidence is absent.
+Use `--controls` to enable confirmed STOP set/clear actions, protected by a
+per-process token and same-origin checks. Clearing STOP does not start a worker.
+
+See the [visual contract](docs/graphical-office/VISUAL_SPEC.md),
+[telemetry mapping](docs/graphical-office/TELEMETRY.md), and
+[verification evidence](docs/graphical-office/VERIFICATION.md).
+
 ## Community
 
 <p>
