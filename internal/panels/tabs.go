@@ -1,5 +1,5 @@
-// Package panels — the right-hand sidebar tab strip and its eight tab
-// panels: chat, terminal, agents, board, mail, activity, git, files (git rides
+// Package panels — the right-hand sidebar tab strip and its nine tab
+// panels: chat, terminal, agents, board, mail, activity, git, files, autopilot (git rides
 // index 6 — the activity index 5 is hardcoded app-side, so git could only
 // append past it). The browser is NOT one of them: it lives on the LEFT
 // pane's floor|browser slot (app/browser.go owns the switcher; the pane
@@ -8,7 +8,7 @@
 // tabs.go — the strip itself: a one-row tab bar (active tab accent bg,
 // others gray) above a rounded-border panel holding the active tab's
 // content. Keys (handled by the app via the keymap): tab/shift+tab cycles,
-// 1..8 jumps straight to a tab. A compact display mode shortens the tab
+// 1..9 jumps straight to a tab. A compact display mode shortens the tab
 // labels to single letters (/compact — the canonical Title() is untouched,
 // so SetActiveByTitle keeps matching the full names).
 package panels
@@ -61,14 +61,15 @@ type tabSpan struct {
 // canonical Title(). Unknown titles keep their full name. (The browser
 // has no entry: it rides the left pane's own switcher, never this strip.)
 var compactLabels = map[string]string{
-	"chat":     "c",
-	"terminal": "t",
-	"agents":   "a",
-	"board":    "b",
-	"mail":     "m",
-	"activity": "x",
-	"git":      "g",
-	"files":    "p",
+	"chat":      "c",
+	"terminal":  "t",
+	"agents":    "a",
+	"board":     "b",
+	"mail":      "m",
+	"activity":  "x",
+	"git":       "g",
+	"files":     "p",
+	"autopilot": "u",
 }
 
 // SetCompact switches the tab-bar label density (the app re-calls it on

@@ -25,10 +25,10 @@ func TestRightPanelTabLabelsActivateTabs(t *testing.T) {
 			}
 		}
 	}
-	if len(clicks) != 8 {
-		t.Fatalf("visible tab click targets = %d, want 8", len(clicks))
+	if len(clicks) != 9 {
+		t.Fatalf("visible tab click targets = %d, want 9", len(clicks))
 	}
-	for idx := 0; idx < 8; idx++ {
+	for idx := 0; idx < 9; idx++ {
 		localX, ok := clicks[idx]
 		if !ok {
 			t.Errorf("tab %d has no visible click target", idx)

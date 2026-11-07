@@ -280,6 +280,47 @@ Browser tab (the left pane, behind `ctrl+b`):
 
 On kitty/ghostty with Chrome, pages render as headless screenshots — ` shot ` badge, PNGs under `~/.theboringfloor/shots/` — and the boss can screenshot pages for you, snapshot pages to read for itself, and (with your approve-once permission) click, fill and eval on them. Pastes into the terminal tab reach the shell bracketed-paste-wrapped. Everywhere else the browser is text on purpose.
 
+## Autopilot (local)
+
+With [Task](https://taskfile.dev) installed, launch the UI, live board worker,
+and foreground TUI together:
+
+```sh
+task all
+task all BOARD="V2 Engineering" UI_BIND="127.0.0.1:8081"
+```
+
+Exit the cockpit to terminate the launcher's UI and worker processes. STOP is
+preserved. Background output goes to the private temporary log directory printed
+at startup. Open `/autopilot` in the TUI (Enter to complete, Enter to execute).
+The worker uses opencode v2; the TUI uses the `tbo-v1` wrapper.
+
+Individual commands: `task cockpit`, `task ui`, `task ui:readonly`, `task worker`,
+`task once`, `task status`, `task stop`, and `task resume`. `BOARD` defaults to
+`V2 Engineering`; `PROJECT` defaults to this checkout. `task` lists commands.
+`task resume` clears STOP without launching a worker.
+
+Until the draft cockpit and graphical branches are combined, the build tasks
+preserve the existing TUI binary when cockpit source is absent from the current
+branch. Build it from `codex/autopilot-cockpit` first if it is missing.
+
+The graphical office monitors local autopilot telemetry without starting an
+agent or changing board cards:
+
+```sh
+go run ./cmd/officeview
+```
+
+Open the printed `http://127.0.0.1:<port>` address. All assets are embedded;
+the page makes no external requests. It reads `~/.theboringfloor/autopilot`
+(or `THEFLOOR_AUTOPILOT_HOME`) and shows unknown values when evidence is absent.
+Use `--controls` to enable confirmed STOP set/clear actions, protected by a
+per-process token and same-origin checks. Clearing STOP does not start a worker.
+
+See the [visual contract](docs/graphical-office/VISUAL_SPEC.md),
+[telemetry mapping](docs/graphical-office/TELEMETRY.md), and
+[verification evidence](docs/graphical-office/VERIFICATION.md).
+
 ## Community
 
 <p>

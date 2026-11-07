@@ -459,6 +459,7 @@ type Model struct {
 	floors                              *panels.Floors
 	files                               *panels.Files
 	tickets                             *panels.Tickets
+	autopilot                           *panels.Autopilot
 	focusPanel                          bool
 	floorNavFocused                     bool
 	// floorStatusInFlight guards the periodic floor-status sweep against
@@ -1581,7 +1582,7 @@ func (m Model) State() state.OfficeState {
 // Init arms the first power-governed tick plus the boot splash's own
 // frame ticker; applyEvent re-arms the office tick every cycle.
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(m.tickCmd(), bootTick(), m.floors.Refresh(), m.files.Refresh(), m.tickets.Refresh(),
+	return tea.Batch(m.tickCmd(), bootTick(), m.floors.Refresh(), m.files.Refresh(), m.tickets.Refresh(), m.autopilot.Refresh(), panels.AutopilotTick(),
 		m.floors.StatusSweepCmd(), floorStatusTick(),
 		// codex-only, best-effort, silent on any gate miss — see
 		// codex_recovery.go. backendName()/sessDir are read here
@@ -1632,6 +1633,11 @@ func (m Model) FrameCacheStats() (hits, misses uint64) {
 
 // Update routes keys, backend events and component ticks.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg.(type) {
+	case panels.AutopilotLoadedMsg, panels.AutopilotTickMsg:
+		m.frameNonce++
+		return m, m.autopilot.Update(msg)
+	}
 	if panels.IsWorkspaceResult(msg) {
 		m.frameNonce++
 		return m, tea.Batch(m.floors.Update(msg), m.files.Update(msg), m.tickets.Update(msg))
@@ -6287,6 +6293,10 @@ func (m *Model) applySlash(input string) tea.Cmd {
 		m.leftTab = leftTabFloor
 		m.tabs.SetActive(3)
 		return m.tickets.Refresh()
+	case "/autopilot":
+		m.leftTab = leftTabFloor
+		m.tabs.SetActiveByTitle("autopilot")
+		return m.autopilot.Refresh()
 	case "/expand":
 		m.focusPanel = !m.focusPanel
 	case "/new":

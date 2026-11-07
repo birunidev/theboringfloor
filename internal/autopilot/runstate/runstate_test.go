@@ -171,3 +171,20 @@ func TestRunLogAndStatus(t *testing.T) {
 		t.Fatalf("status = %+v err=%v", s, err)
 	}
 }
+
+func TestWorkersStatusRoundTrip(t *testing.T) {
+	p := tmpPaths(t)
+	if err := p.WriteWorkers(WorkersStatus{Workers: []WorkerStatus{
+		{Lane: "space/backend", Status: Status{State: "running", Card: "BII-BE", Stage: "preflight"}},
+		{Lane: "space/frontend", Status: Status{State: "running", Card: "BII-FE", Stage: "implement:1"}},
+	}}, time.Unix(1700000000, 0)); err != nil {
+		t.Fatal(err)
+	}
+	s, err := p.ReadWorkers()
+	if err != nil || s.Version != 1 || len(s.Workers) != 2 || s.Workers[1].Card != "BII-FE" || s.UpdatedAt == "" {
+		t.Fatalf("workers = %+v err=%v", s, err)
+	}
+	if info, err := os.Stat(p.WorkersFile()); err != nil || info.Mode().Perm() != 0o600 {
+		t.Fatalf("workers mode = %v err=%v", info, err)
+	}
+}
