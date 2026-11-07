@@ -611,6 +611,216 @@ function announce(text) {
     }
   }, 2000);
 }
+// ---- Parallel lanes (workers.json) ------------------------------------------
+// Used only when the server proves workers.json is the pair of the current
+// status.json (usable) and lists two or more lanes. Each lane is its own
+// worker with its own card, stage and log. Nothing here moves or animates:
+// every position is the lane's last reported stage.
+let currentLanes = null;
+let laneView = { stopped: false, connection: "" };
+const laneRowEls = new Map();
+const laneWorkerEls = new Map();
+const lanesOf = (s) => {
+  const w = s?.workers;
+  return w && w.usable && Array.isArray(w.lanes) && w.lanes.length >= 2
+    ? w.lanes
+    : null;
+};
+// A lane's records: its own log, and only the run and card it reports now.
+const laneRows = (lane) =>
+  lane.status?.run && lane.status?.card
+    ? sortedRows().filter(
+        (r) =>
+          r.lane === lane.lane &&
+          r.native.run === lane.status.run &&
+          r.native.card === lane.status.card,
+      )
+    : [];
+// This card's lifetime usage against the per-card cap, from usage.json.
+function laneUsage(tokens, cap) {
+  if (!validNumber(tokens)) return "This card: usage unavailable";
+  if (!validNumber(cap) || cap <= 0)
+    return `This card: ${tokens.toLocaleString("en")} tokens · cap unavailable`;
+  const ratio = tokens / cap;
+  return `This card: ${compact(tokens)} / ${compact(cap)}${ratio >= 1 ? " · Cap reached" : ratio >= 0.8 ? " · Near cap" : ""}`;
+}
+function laneModel(lane) {
+  const st = lane.status || {};
+  return {
+    cardTokens: lane.cardTokens,
+    lane: lane.lane,
+    st,
+    info: st.state === "running" ? stageInfo(st) : null,
+    facts: deskFacts(laneRows(lane)),
+    fresh: fresh(st),
+  };
+}
+function laneFactsFor(models, id) {
+  const have = models.filter((m) => m.facts.get(id));
+  if (have.length === 1) return have[0].facts.get(id);
+  if (have.length > 1) return { multi: have.length };
+  return undefined;
+}
+function showFacts(item, f) {
+  item.facts.hidden = !f;
+  if (!f) return;
+  if (f.multi) {
+    // Per-lane numbers differ; the inspector lists them lane by lane.
+    item.facts.replaceChildren(el("span", `${f.multi} lanes`, "facts-actions"));
+    item.facts.setAttribute("aria-label", `${f.multi} lanes have records for this desk; open the inspector for each lane`);
+    item.facts.className = "facts";
+    return;
+  }
+  // Separate parts: only the rejection count carries the danger color, and
+  // narrow desktop desks can show a shorter form (see style.css).
+  const parts = [
+    el("span", `✓ ${f.allowed}`, "facts-actions"),
+    el("span", " · ", "facts-actions"),
+    el("span", `× ${f.rejected}`, `facts-actions${f.rejected ? " facts-rejected" : ""}`),
+  ];
+  if (f.billable !== null)
+    parts.push(el("span", " · ", "facts-actions"), el("span", `${compact(f.billable)} tokens`, "facts-tokens"));
+  item.facts.replaceChildren(...parts);
+  item.facts.setAttribute(
+    "aria-label",
+    `${f.allowed} actions allowed, ${f.rejected} rejected${f.billable !== null ? `, ${f.billable.toLocaleString("en")} billable tokens` : ""}`,
+  );
+  item.facts.className = `facts${f.billable !== null ? " has-tokens" : ""}`;
+}
+// Desk badges when lanes are reported: which lane is working or done where.
+function laneDesks(models, stopped, connection) {
+  const names = (ms) => ms.map((m) => m.lane).join(", ");
+  for (const [id, item] of stations) {
+    if (id === "queue") continue;
+    // On the desktop floor the worker sits on its desk and carries the lane
+    // label, so badges stay short; compact layouts name lanes in the badge.
+    const narrow = innerWidth >= 1100;
+    const at = models.filter((m) => m.info?.[0] === id);
+    const working = at.filter((m) => !m.facts.get(id)?.doneSeen && m.fresh.ok);
+    const stale = at.filter((m) => !m.facts.get(id)?.doneSeen && !m.fresh.ok);
+    const finished = models.filter((m) => m.facts.get(id)?.doneSeen);
+    item.section.classList.toggle("active", !connection && !stopped && working.length > 0);
+    if (stopped && at.length) setBadge(item, narrow ? "Last reported" : `Last reported: ${names(at)}`);
+    else if (working.length)
+      setBadge(
+        item,
+        narrow
+          ? working.length === 1 ? "Working" : `Working · ${working.length} lanes`
+          : working.length === 1 ? `Working · ${working[0].lane}` : `Working · ${working.length} lanes (${names(working)})`,
+        "working",
+      );
+    else if (stale.length) setBadge(item, narrow ? "Last reported" : `Last reported: ${names(stale)}`);
+    else if (finished.length) setBadge(item, narrow ? "Done" : `Done · ${names(finished)}`);
+  }
+}
+// One static worker per lane at that lane's reported desk; lanes sharing a
+// desk are spaced apart. Each is labelled with its lane and card.
+function syncLaneWorkers(models, stopped, connection) {
+  const want = (models || []).filter((m) => m.info);
+  const keep = new Set(want.map((m) => m.lane));
+  for (const [name, node] of laneWorkerEls)
+    if (!keep.has(name)) {
+      node.remove();
+      laneWorkerEls.delete(name);
+    }
+  const perDesk = new Map(),
+    index = new Map();
+  for (const m of want) perDesk.set(m.info[0], (perDesk.get(m.info[0]) || 0) + 1);
+  for (const m of want) {
+    const desk = m.info[0];
+    let node = laneWorkerEls.get(m.lane);
+    if (!node) {
+      node = el("div", null, "lane-worker carrying");
+      node.append(graphic("worker-idle-0", "character", 40, 48), el("span", "", "lane-tag"));
+      $("lane-workers").append(node);
+      laneWorkerEls.set(m.lane, node);
+    }
+    const k = index.get(desk) || 0;
+    index.set(desk, k + 1);
+    const p = anchor(desk),
+      offset = (k - (perDesk.get(desk) - 1) / 2) * 30;
+    node.style.left = `min(${p.left + offset}px, calc(100% - 20px))`;
+    node.style.top = `${p.top}px`;
+    node.querySelector("use").setAttribute("href", `#worker-${m.info[2]}-0`);
+    // Labels of lanes sharing a desk stack so none hides another.
+    node.querySelector(".lane-tag").style.top = `${50 + k * 22}px`;
+    const frozen = stopped || !!connection || !m.fresh.ok;
+    node.querySelector(".lane-tag").textContent =
+      `${frozen ? "Last reported · " : ""}${m.lane} · ${m.st.card || "card unavailable"}`;
+  }
+}
+function renderLanePanel(s, st, models, connection, stopped) {
+  laneView = { stopped, connection };
+  $("stations").classList.toggle("lane-mode", !!models);
+  $("lanes-panel").hidden = !models;
+  $("round").hidden = !!models;
+  $("reported-tokens").hidden = !!models;
+  // status.json says several lanes run (a summary with no card) but their
+  // detail is missing or not provably current: say so, show no lanes.
+  const summaryOnly = st?.state === "running" && !st.card && !st.stage && !models;
+  const warn = $("lanes-warning");
+  warn.hidden = !summaryOnly;
+  warn.textContent = summaryOnly
+    ? `Lane details unavailable · ${s.workersError || s.workers?.reason || "workers.json not found"}`
+    : "";
+  syncLaneWorkers(models, stopped, connection);
+  if (!models) {
+    for (const r of laneRowEls.values()) r.li.remove();
+    laneRowEls.clear();
+    return;
+  }
+  $("card").hidden = true;
+  $("no-card").hidden = true;
+  $("stage").textContent = `${models.length} lanes active`;
+  // One card meter cannot describe several cards: each lane row shows its own.
+  const cm = meters.get("card-meter");
+  cm.total.textContent = "Per lane";
+  cm.meter.hidden = true;
+  cm.unknownTrack.hidden = true;
+  cm.meaning.textContent = "Each lane shows its own card usage";
+  cm.exact.textContent = models.map((m) => `${m.lane} (${m.st.card || "card unavailable"}): ${laneUsage(m.cardTokens, s.cardCap)}`).join(". ");
+  const list = $("lane-list"),
+    seen = new Set();
+  models.forEach((m, i) => {
+    seen.add(m.lane);
+    let r = laneRowEls.get(m.lane);
+    if (!r) {
+      r = {
+        li: el("li", null, "lane-row card-chip"),
+        name: el("p", "", "lane-name"),
+        key: el("p", "", "lane-key"),
+        title: el("p", "", "clamped"),
+        badge: el("span", "", "badge"),
+        meta: el("p", "", "meta"),
+        usage: el("p", "", "meta"),
+        btn: el("button", ""),
+      };
+      r.btn.setAttribute("aria-haspopup", "dialog");
+      r.btn.addEventListener("click", () => {
+        const cur = currentLanes?.find((x) => x.lane === m.lane);
+        if (cur?.info) openInspector(cur.info[0], r.btn, m.lane);
+      });
+      r.li.append(r.name, r.key, r.title, r.badge, r.meta, r.usage, r.btn);
+      laneRowEls.set(m.lane, r);
+    }
+    r.name.textContent = m.lane;
+    r.key.textContent = m.st.card || "Card unavailable";
+    r.title.textContent = m.st.title || "Title unavailable";
+    const stageText = m.st.state === "running" ? (m.info ? m.info[1] : "Stage unavailable") : m.st.state || "Unknown";
+    r.badge.textContent = `${m.info && m.fresh.ok ? "●" : "?"} ${stageText}`;
+    r.badge.className = `badge ${m.info && m.fresh.ok ? "working" : "warning"}`;
+    r.meta.textContent = `${roundLabel(m.st)} · Reported tokens: ${validNumber(m.st.tokens) ? m.st.tokens.toLocaleString("en") : "Unavailable"} · ${m.fresh.text}`;
+    r.usage.textContent = laneUsage(m.cardTokens, s.cardCap);
+    r.btn.hidden = !m.info;
+    r.btn.textContent = `Inspect ${m.lane}`;
+    if (list.children[i] !== r.li) list.insertBefore(r.li, list.children[i] || null);
+  });
+  for (const [name, r] of laneRowEls)
+    if (!seen.has(name)) {
+      r.li.remove();
+      laneRowEls.delete(name);
+    }
+}
 function renderState(s, fromNetwork = true) {
   const prior = lastStatus,
     previousRun = currentRun,
@@ -649,6 +859,10 @@ function renderState(s, fromNetwork = true) {
       lastAnchor = "queue";
     }
   }
+  // Lane logs first, so a log that is both a lane log and the status log
+  // keeps its lane label.
+  for (const l of s.workers?.lanes || [])
+    for (const row of l.events || []) addEvent(row, true);
   for (const row of s.events || []) addEvent(row, true);
   // Idle: the latest finished run is offered as static history only.
   if (!s.logAvailable)
@@ -791,6 +1005,11 @@ function renderState(s, fromNetwork = true) {
   // live stage telemetry, so they remain Unknown instead of simulating work.
   const running = st?.state === "running" && !connection;
   const curFacts = running ? deskFacts(currentRows()) : new Map();
+  // Parallel lanes (workers.json, only when paired with status.json): each
+  // lane is its own worker with its own card, stage and log.
+  const laneList = lanesOf(s);
+  const models = laneList ? laneList.map(laneModel) : null;
+  currentLanes = models;
   for (const [id, item] of stations) {
     if (id === "queue") continue;
     const isWorking = id === active;
@@ -817,38 +1036,23 @@ function renderState(s, fromNetwork = true) {
           : "Unknown",
       );
   }
+  if (models) laneDesks(models, stopped, connection);
   for (const [id, item] of stations) {
-    const f = curFacts.get(id);
+    const f = models ? laneFactsFor(models, id) : curFacts.get(id);
     item.section.classList.toggle("long-badge", item.result.startsWith("Last reported"));
-    item.facts.hidden = !f;
-    if (!f) continue;
-    // Separate parts: only the rejection count carries the danger color, and
-    // narrow desktop desks can show a shorter form (see style.css).
-    const parts = [
-      el("span", `✓ ${f.allowed}`, "facts-actions"),
-      el("span", " · ", "facts-actions"),
-      el("span", `× ${f.rejected}`, `facts-actions${f.rejected ? " facts-rejected" : ""}`),
-    ];
-    if (f.billable !== null)
-      parts.push(el("span", " · ", "facts-actions"), el("span", `${compact(f.billable)} tokens`, "facts-tokens"));
-    item.facts.replaceChildren(...parts);
-    item.facts.setAttribute(
-      "aria-label",
-      `${f.allowed} actions allowed, ${f.rejected} rejected${f.billable !== null ? `, ${f.billable.toLocaleString("en")} billable tokens` : ""}`,
-    );
-    item.facts.className = `facts${f.billable !== null ? " has-tokens" : ""}`;
+    showFacts(item, f);
   }
-  const [stateIcon, stateText, stateTone] = officeState(s, st, info, curFacts, connection, stopped, sameRunTerminal);
+  const [stateIcon, stateText, stateTone] = officeState(s, st, info, curFacts, connection, stopped, sameRunTerminal, models);
   $("office-state").textContent = `${stateIcon} ${stateText}`;
   $("office-state").className = `badge ${stateTone}`;
-  const canInspect = running && stations.has(active);
+  const canInspect = running && stations.has(active) && !models;
   $("inspect-current").hidden = !canInspect;
   if (canInspect)
     $("inspect-current").textContent = `Inspect ${roleOf[active]}`;
   const tag = $("worker-tag");
   // At an outcome shelf the strip states the result; no stale role label.
   const atShelf = active.startsWith("outcome:");
-  tag.hidden = !(running && hasCard && info) || atShelf;
+  tag.hidden = !(running && hasCard && info) || atShelf || !!models;
   tag.textContent =
     running && hasCard && info
       ? `${curFacts.get(info[0])?.doneSeen ? "Last reported" : roleOf[info[0]]} · ${st.card}`
@@ -858,8 +1062,9 @@ function renderState(s, fromNetwork = true) {
     shelf.subtitle.textContent = outcomesKnown
       ? `Today, from run logs${s.outcomesError ? ` · ${s.outcomesError}` : ""}`
       : "This session";
-  $("activity-status").hidden = !!s.logAvailable && events.size > 0;
-  $("activity-status").textContent = s.logAvailable
+  const liveLog = !!s.logAvailable || (s.workers?.lanes || []).some((l) => l.logAvailable);
+  $("activity-status").hidden = liveLog && events.size > 0;
+  $("activity-status").textContent = liveLog
     ? "No events recorded."
     : s.lastRun && (s.lastEvents || []).length
       ? `Last run · ${s.lastRun.card} · ${s.lastRun.run} · finished run history, not live`
@@ -877,6 +1082,7 @@ function renderState(s, fromNetwork = true) {
     );
   }
   $("runs-error").textContent = s.runsError || "";
+  renderLanePanel(s, st, models, connection, stopped);
   const sameRun = prior && prior.run && prior.run === st?.run,
     stageChanged = sameRun && prior.stage !== st.stage;
   const route = [
@@ -929,9 +1135,13 @@ function eventContext(row) {
 function eventOrder(a, b) {
   const [fileA, offsetA] = a.id.split(":"),
     [fileB, offsetB] = b.id.split(":");
-  return fileA === fileB
-    ? Number(offsetA) - Number(offsetB)
-    : fileOrder.get(fileA) - fileOrder.get(fileB);
+  if (fileA === fileB) return Number(offsetA) - Number(offsetB);
+  // Different logs (parallel lanes, earlier runs): real timestamps order them;
+  // without both, keep the order the logs were first seen in.
+  const ta = Date.parse(a.native?.ts),
+    tb = Date.parse(b.native?.ts);
+  if (Number.isFinite(ta) && Number.isFinite(tb) && ta !== tb) return ta - tb;
+  return fileOrder.get(fileA) - fileOrder.get(fileB);
 }
 function isCurrent(row, context) {
   return (
@@ -1028,7 +1238,7 @@ function eventMessage(n) {
 }
 // One line that says what the office is doing, by precedence. Every branch
 // comes from status.json, STOP, or attributable run-log records.
-function officeState(s, st, info, curFacts, connection, stopped, sameRunTerminal) {
+function officeState(s, st, info, curFacts, connection, stopped, sameRunTerminal, models) {
   if (connection) return ["?", connection, "warning"];
   if (stopped)
     return [
@@ -1036,6 +1246,15 @@ function officeState(s, st, info, curFacts, connection, stopped, sameRunTerminal
       `Stopped · STOP set${st?.state === "running" ? " · execution still reported running" : ""}`,
       "danger",
     ];
+  if (models) {
+    const staleAll = models.every((m) => !m.fresh.ok);
+    const each = models
+      .map((m) => `${m.lane} · ${m.info ? m.info[1] : m.st.state === "running" ? "stage unavailable" : m.st.state || "unknown"}`)
+      .join(" | ");
+    return staleAll
+      ? ["–", `${models.length} lanes · no recent updates · last reported ${each}`, "warning"]
+      : ["●", `Working · ${models.length} lanes in parallel (workers.json) · ${each}`, "working"];
+  }
   if (st?.state === "running") {
     if (errorEvent)
       return ["×", `Error reported · during ${st.stage || "unknown stage"}`, "danger"];
@@ -1088,35 +1307,11 @@ let inspectorReturn = null;
 const dlRow = (dl, label, value) => {
   dl.append(el("dt", label), el("dd", value));
 };
-function openInspector(id, trigger) {
-  const item = stations.get(id);
-  if (!item) return;
-  inspectorReturn = trigger || null;
-  const running = lastStatus?.state === "running";
-  const cur = running ? deskFacts(currentRows()) : new Map();
-  const last = !running ? deskFacts(lastRows()) : new Map();
-  const f = cur.get(id) || last.get(id) || null;
-  const scope = cur.get(id)
-    ? `Current run · ${lastStatus.card || "card unavailable"}`
-    : last.get(id)
-      ? `Last run · ${snapshot.lastRun.card} · finished history, not live`
-      : running
-        ? `Current run · ${lastStatus.card || "card unavailable"} · no log records for this desk yet`
-        : "No run data for this desk";
-  const name = item.section.getAttribute("aria-label");
-  $("inspector-heading").textContent = `${name} · ${roleOf[id]}`;
-  const body = $("inspector-body");
-  body.replaceChildren();
+function appendInspectorSection(body, id, sec) {
+  const f = sec.f;
+  if (sec.title) body.append(el("h3", sec.title));
   const dl = el("dl", null, "inspector-facts");
-  dlRow(dl, "Desk status", item.result);
-  dlRow(dl, "Scope", scope);
-  dlRow(
-    dl,
-    "Handled by",
-    id === "queue"
-      ? "Not a worker desk"
-      : `${roleOf[id]} · ${modelRole.has(id) ? "separate AI agent session" : "engine step, no model"}`,
-  );
+  dlRow(dl, "Scope", sec.scope);
   if (f) {
     dlRow(dl, "Session", f.session || "Unavailable · no stage event for this desk in this run");
     dlRow(dl, "Started", f.started || "Unavailable");
@@ -1137,7 +1332,6 @@ function openInspector(id, trigger) {
     dlRow(dl, "Actions", `${f.allowed} allowed · ${f.rejected} rejected`);
   }
   body.append(dl);
-  if (telemetryGap[id]) body.append(el("p", telemetryGap[id], "meta"));
   if (f && f.perms.length) {
     body.append(el("h3", `Recent actions (last ${f.perms.length})`));
     const list = el("ol", null, "inspector-actions");
@@ -1162,6 +1356,62 @@ function openInspector(id, trigger) {
     d.append(el("summary", "Agent's own summary · not verified"), el("pre", f.summary));
     body.append(d);
   }
+}
+function openInspector(id, trigger, onlyLane = null) {
+  const item = stations.get(id);
+  if (!item) return;
+  inspectorReturn = trigger || null;
+  const name = item.section.getAttribute("aria-label");
+  $("inspector-heading").textContent = `${name} · ${roleOf[id]}`;
+  const body = $("inspector-body");
+  body.replaceChildren();
+  const head = el("dl", null, "inspector-facts");
+  dlRow(head, "Desk status", item.result);
+  dlRow(
+    head,
+    "Handled by",
+    id === "queue"
+      ? "Not a worker desk"
+      : `${roleOf[id]} · ${modelRole.has(id) ? "separate AI agent session" : "engine step, no model"}`,
+  );
+  body.append(head);
+  if (telemetryGap[id]) body.append(el("p", telemetryGap[id], "meta"));
+  const sections = [];
+  if (currentLanes) {
+    // Parallel lanes: one section per lane that has records here or is here.
+    for (const m of currentLanes) {
+      if (onlyLane && m.lane !== onlyLane) continue;
+      const f = m.facts.get(id) || null;
+      if (!f && m.info?.[0] !== id) continue;
+      const card = m.st.card || "card unavailable";
+      sections.push({
+        title: `Lane ${m.lane} · ${card}`,
+        f,
+        scope: f
+          ? `Lane ${m.lane} · current run · ${card}`
+          : `Lane ${m.lane} · current run · ${card} · no log records for this desk yet`,
+      });
+    }
+    if (!sections.length)
+      sections.push({ title: "", f: null, scope: "No lane has records for this desk" });
+  } else {
+    const running = lastStatus?.state === "running";
+    const cur = running ? deskFacts(currentRows()) : new Map();
+    const last = !running ? deskFacts(lastRows()) : new Map();
+    const f = cur.get(id) || last.get(id) || null;
+    sections.push({
+      title: "",
+      f,
+      scope: cur.get(id)
+        ? `Current run · ${lastStatus.card || "card unavailable"}`
+        : last.get(id)
+          ? `Last run · ${snapshot.lastRun.card} · finished history, not live`
+          : running
+            ? `Current run · ${lastStatus.card || "card unavailable"} · no log records for this desk yet`
+            : "No run data for this desk",
+    });
+  }
+  for (const sec of sections) appendInspectorSection(body, id, sec);
   $("inspector").showModal();
   $("inspector-close").focus();
 }
@@ -1214,7 +1464,8 @@ function addEvent(row, history = false) {
     if (same) terminal = { ...context, kind, eventId: row.id };
     if (!history) announce(eventMessage(n)[1]);
   }
-  const [icon, message, tone] = eventMessage(n),
+  const [icon, baseMessage, tone] = eventMessage(n),
+    message = row.lane ? `[${row.lane}] ${baseMessage}` : baseMessage,
     li = el("li");
   li.dataset.eventId = row.id;
   li.append(el("span", icon, `event-icon ${tone}`));
@@ -1461,10 +1712,12 @@ document.addEventListener("visibilitychange", () => {
 addEventListener("resize", () => {
   cancelMotion();
   placeWorker();
+  if (currentLanes) syncLaneWorkers(currentLanes, laneView.stopped, laneView.connection);
 });
 new ResizeObserver(() => {
   cancelMotion();
   placeWorker();
+  if (currentLanes) syncLaneWorkers(currentLanes, laneView.stopped, laneView.connection);
 }).observe($("stations"));
 refresh();
 setInterval(refresh, 2000);
