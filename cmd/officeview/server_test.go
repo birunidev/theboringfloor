@@ -311,3 +311,108 @@ func TestEmbeddedAssetsAndNoReadSideEffects(t *testing.T) {
 		t.Fatal("GET wrote files")
 	}
 }
+
+// writeRun writes JSONL records to runs/<card>/<run>.jsonl with a fixed mtime.
+func writeRun(t *testing.T, home, card, run string, mod time.Time, records ...any) string {
+	t.Helper()
+	dir := filepath.Join(home, "runs", card)
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	var b strings.Builder
+	for _, r := range records {
+		if s, ok := r.(string); ok {
+			b.WriteString(s + "\n")
+			continue
+		}
+		line, _ := json.Marshal(r)
+		b.Write(line)
+		b.WriteByte('\n')
+	}
+	name := filepath.Join(dir, run+".jsonl")
+	if err := os.WriteFile(name, []byte(b.String()), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(name, mod, mod); err != nil {
+		t.Fatal(err)
+	}
+	return name
+}
+
+func end(card, run, kind, ts string, extra map[string]any) map[string]any {
+	data := map[string]any{"kind": kind, "summary": kind + " summary"}
+	for k, v := range extra {
+		data[k] = v
+	}
+	return map[string]any{"kind": "end", "card": card, "run": run, "ts": ts, "msg": "done", "data": data}
+}
+
+func TestIdleShowsLastRunAndTodayOutcomes(t *testing.T) {
+	o, srv := fixture(t)
+	day := time.Date(2026, 11, 7, 0, 0, 0, 0, time.UTC)
+	put(t, o.home, "status.json", map[string]any{"state": "idle", "updatedAt": "2026-11-07T11:59:00Z", "note": "last: BII-3 needs-clarification"})
+	writeRun(t, o.home, "BII-1", "r-yesterday", day.Add(-2*time.Hour),
+		end("BII-1", "r-yesterday", "ready-for-review", "2026-11-06T22:00:00Z", map[string]any{"pr": "https://github.com/o/r/pull/1"}))
+	writeRun(t, o.home, "BII-2", "r-blocked", day.Add(9*time.Hour),
+		map[string]any{"kind": "start", "card": "BII-2", "run": "r-blocked", "ts": "2026-11-07T08:59:00Z"},
+		end("BII-2", "r-blocked", "blocked", "2026-11-07T09:00:00Z", map[string]any{"rounds": 3}))
+	writeRun(t, o.home, "BII-3", "r-clarify", day.Add(11*time.Hour),
+		map[string]any{"kind": "start", "card": "BII-3", "run": "r-clarify", "ts": "2026-11-07T10:59:00Z"},
+		end("BII-3", "r-clarify", "needs-clarification", "2026-11-07T11:00:00Z", nil),
+		end("BII-3", "r-clarify", "needs-clarification", "2026-11-07T11:00:01Z", nil)) // duplicate end
+	writeRun(t, o.home, "BII-4", "r-dry-dry", day.Add(10*time.Hour),
+		map[string]any{"kind": "end", "card": "BII-4", "run": "r-dry-dry", "ts": "2026-11-07T10:00:00Z", "data": map[string]any{"ready": false}})
+	writeRun(t, o.home, "BII-5", "r-broken", day.Add(8*time.Hour), "{not json")
+
+	s := getSnapshot(t, srv)
+	if s.LastRun == nil || s.LastRun.Card != "BII-3" || s.LastRun.Run != "r-clarify" {
+		t.Fatalf("last run = %+v, want the most recently modified log (BII-3)", s.LastRun)
+	}
+	if len(s.LastEvents) != 3 || !s.LastEvents[0].History {
+		t.Fatalf("last events = %d (history=%v), want 3 history records", len(s.LastEvents), len(s.LastEvents) > 0 && s.LastEvents[0].History)
+	}
+	if len(s.TodayOutcomes) != 2 {
+		t.Fatalf("today outcomes = %+v, want BII-2 blocked and BII-3 clarification only", s.TodayOutcomes)
+	}
+	if got := s.TodayOutcomes[0]; got.Card != "BII-2" || got.Kind != "blocked" || got.Rounds == nil || *got.Rounds != 3 || got.Summary != "blocked summary" {
+		t.Fatalf("first outcome = %+v", got)
+	}
+	if s.TodayOutcomes[1].Card != "BII-3" || s.TodayOutcomes[1].Kind != "needs-clarification" {
+		t.Fatalf("second outcome = %+v", s.TodayOutcomes[1])
+	}
+	if s.OutcomesDay != "2026-11-07" || s.OutcomesError != "Some run logs were unreadable" {
+		t.Fatalf("day=%q error=%q", s.OutcomesDay, s.OutcomesError)
+	}
+}
+
+func TestRunningHasNoLastRunHistory(t *testing.T) {
+	o, srv := fixture(t)
+	log := writeRun(t, o.home, "BII-9", "r-now", time.Date(2026, 11, 7, 11, 0, 0, 0, time.UTC),
+		map[string]any{"kind": "start", "card": "BII-9", "run": "r-now", "ts": "2026-11-07T11:00:00Z"})
+	put(t, o.home, "status.json", map[string]any{"state": "running", "run": "r-now", "card": "BII-9", "stage": "preflight", "updatedAt": "2026-11-07T11:59:30Z", "logPath": log})
+	s := getSnapshot(t, srv)
+	if s.LastRun != nil || len(s.LastEvents) != 0 {
+		t.Fatalf("running status must not get last-run history: %+v", s.LastRun)
+	}
+	if !s.LogAvailable || len(s.Events) != 1 {
+		t.Fatalf("current log not served: available=%v events=%d", s.LogAvailable, len(s.Events))
+	}
+}
+
+func TestRunScanSkipsSymlinks(t *testing.T) {
+	o, srv := fixture(t)
+	outside := t.TempDir()
+	writeRun(t, outside, "BII-X", "r-outside", time.Date(2026, 11, 7, 11, 30, 0, 0, time.UTC),
+		end("BII-X", "r-outside", "ready-for-review", "2026-11-07T11:30:00Z", nil))
+	if err := os.MkdirAll(filepath.Join(o.home, "runs"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(outside, "runs", "BII-X"), filepath.Join(o.home, "runs", "BII-X")); err != nil {
+		t.Fatal(err)
+	}
+	put(t, o.home, "status.json", map[string]any{"state": "idle", "updatedAt": "2026-11-07T11:59:00Z"})
+	s := getSnapshot(t, srv)
+	if s.LastRun != nil || len(s.TodayOutcomes) != 0 {
+		t.Fatalf("a symlinked run directory outside the home was read: last=%+v outcomes=%+v", s.LastRun, s.TodayOutcomes)
+	}
+}

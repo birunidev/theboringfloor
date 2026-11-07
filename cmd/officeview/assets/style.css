@@ -882,3 +882,202 @@ dialog p {
   animation: none !important;
   scroll-behavior: auto !important;
 }
+
+/* Office status strip: one line saying what the office is doing. */
+.office-state-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-top: 12px;
+}
+.office-state-row .badge {
+  font-size: 16px;
+  min-height: 32px;
+  padding: 4px 10px;
+}
+/* Desk name doubles as the inspect control (44px hit area via ::after). */
+.desk-name {
+  position: relative;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-weight: 650;
+  color: var(--text);
+  text-align: left;
+  text-decoration: underline;
+  text-decoration-color: var(--divider);
+  text-underline-offset: 4px;
+}
+/* The button box itself is 44px (spec hit area); negative margins keep the
+   desk's text rhythm unchanged. */
+.desk-name {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  min-width: 44px;
+  margin: -11px 0;
+}
+.desk-name:hover {
+  background: none;
+  text-decoration-color: var(--accent);
+}
+.facts {
+  font:
+    600 14px ui-monospace,
+    SFMono-Regular,
+    Consolas,
+    "Liberation Mono",
+    monospace;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+.facts-rejected {
+  color: var(--danger);
+}
+/* Who is at the desk: a readable label under the worker. */
+.worker-tag {
+  position: absolute;
+  top: 50px;
+  left: 50%;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.5;
+  padding: 0 6px;
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--accent);
+  border: 1px solid var(--accent);
+}
+#worker {
+  overflow: visible;
+}
+/* Inspector dialog: same pattern as the confirmation, wider for details. */
+dialog.inspector {
+  max-width: 640px;
+  max-height: calc(100vh - 32px);
+  overflow: auto;
+}
+.inspector-facts {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 8px 16px;
+  margin-bottom: 16px;
+}
+.inspector-facts dt {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--muted);
+}
+.inspector-facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+#inspector-body h3 {
+  font-size: 16px;
+  margin: 8px 0;
+}
+.inspector-actions {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 16px;
+  display: grid;
+  gap: 8px;
+}
+.inspector-actions li {
+  border-top: 1px solid var(--divider);
+  padding-top: 8px;
+  overflow-wrap: anywhere;
+}
+.inspector-actions time {
+  font-size: 12px;
+  color: var(--muted);
+}
+#inspector-body pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 14px;
+  background: var(--surface-subtle);
+  padding: 12px;
+  border-radius: 8px;
+}
+.event-muted {
+  color: var(--muted);
+}
+@media (max-width: 639px) {
+  .inspector-facts {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .inspector-facts dd {
+    margin-bottom: 8px;
+  }
+}
+#inspect-current {
+  position: relative;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+#inspect-current {
+  min-height: 44px;
+  min-width: 44px;
+  margin: -10px 0;
+}
+@media (min-width: 1100px) {
+  /* Keep the spec's 560px floor: the strip shares the heading's 24px row. */
+  .floor > h2 {
+    display: inline-block;
+    vertical-align: middle;
+  }
+  .office-state-row {
+    display: inline-flex;
+    vertical-align: middle;
+    margin: 0 0 0 16px;
+    max-width: calc(100% - 120px);
+  }
+  .office-state-row .badge {
+    min-height: 24px;
+    padding: 2px 8px;
+    font-size: 14px;
+  }
+}
+
+@media (min-width: 1100px) {
+  /* Narrow desks (192px): one short line. A finished desk shows its tokens,
+     a working desk its action counts; the inspector has everything. */
+  .station.claim .facts,
+  .station.setup .facts,
+  .station.preflight .facts {
+    font: 600 12px/1.5 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    white-space: nowrap;
+  }
+  .station.claim .facts.has-tokens .facts-actions,
+  .station.setup .facts.has-tokens .facts-actions,
+  .station.preflight .facts.has-tokens .facts-actions {
+    display: none;
+  }
+}
+
+@media (min-width: 1100px) {
+  /* A wrapped "Last reported" badge fills a narrow desk; facts move to the inspector. */
+  .station.claim.long-badge .facts,
+  .station.setup.long-badge .facts,
+  .station.preflight.long-badge .facts {
+    display: none;
+  }
+}
+@media (max-width: 1099px) {
+  /* The worker sits inside the active desk and the strip names the role;
+     a floating label would overflow narrow desks. */
+  .worker-tag {
+    display: none !important;
+  }
+}

@@ -186,3 +186,22 @@ lacked bubblewrap's private `/dev` mount and failed to access `/dev/null`; the
 corrected sandbox command above passed. No live board worker was started during
 this verification. To run actual work, the founder invokes `task all`,
 `task worker` or `task once` explicitly.
+
+## Office readability additions — verification (7 Nov 2026)
+
+Changed: `cmd/officeview/{state.go,server_test.go,assets/app.js,assets/index.html,assets/style.css}`,
+new `cmd/officeview/office-proof.mjs`, `TELEMETRY.md` (new section), evidence `office-*.png` and
+`office-proof-output.txt`.
+
+```sh
+go vet ./cmd/officeview && go test -race -count=1 ./cmd/officeview ./internal/autopilot/...
+go build -o /tmp/officeview-browser/officeview ./cmd/officeview
+PLAYWRIGHT_MODULE=/tmp/officeview-browser/node_modules/playwright/index.mjs \
+OFFICEVIEW=/tmp/officeview-browser/officeview OUT=docs/graphical-office/evidence \
+  node cmd/officeview/office-proof.mjs        # 212 checks, 28 screenshots
+OFFICEVIEW_SHOTS=/tmp/codex-shots PLAYWRIGHT_MODULE=... node cmd/officeview/browser-proof.mjs   # existing proof, PASS
+PLAYWRIGHT_MODULE=... node cmd/officeview/contrast-proof.mjs                                   # PASS
+```
+
+All fixtures are TEST DATA homes (idle with history, active implement, parallel reviewers,
+blocked, stopped), rendered with `--test-data` so the page shows the TEST DATA banner.

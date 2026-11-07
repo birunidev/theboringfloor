@@ -78,3 +78,26 @@ errors, event payloads and configuration-derived names. The CSP disallows
 external scripts, connections and embedding. Theme/motion preferences use local
 browser storage as specified. `--test-data` only adds the visible TEST DATA
 label; it never supplies fallback telemetry or changes the state mapping.
+
+## Office readability additions (founder-approved, 7 Nov 2026)
+
+Approved by the founder in chat: show proven reviewer concurrency, use real
+run-log history when idle, a dialog inspector, engine instrumentation later in
+its own PR. Every value below is read from existing telemetry; nothing new is
+inferred.
+
+| What the office now shows | Exact source |
+|---|---|
+| Office status strip (Working / Between reported stages / Stopped / Error reported / Ready for review / Questions asked / On hold / Idle) | `status.json` state+stage+updatedAt, STOP, current-run `error` and `end` records; precedence in `officeState()` |
+| Who handles a desk | Stage → role as the engine assigns it: `preflight` Pre-flight agent, `implement:N` Implementer, `review:*` Reviewer 1/2/3 (separate AI sessions); claim/setup/checks/publish Autopilot engine (no model) |
+| Desk facts `✓ allowed · × rejected · tokens` | Current-run `permission` records carry `stage` and `data.allow`; `stage-done.data.billable` |
+| Reviewers working in parallel | Current-run `review:*` `stage` record with no later `stage-done`. Shown together only when the log proves it (the real BII-811 run started all three within 5 ms) |
+| Between reported stages | The status stage already has `stage-done` and no new stage started. Checks and publish emit no log records today, so they appear here, never as Working |
+| Inspector (dialog) | Literal `stage.msg` (session), `stage.ts`, `stage-done.ts`, `billable`, last 10 `permission` records with literal reasons, `stage-done.msg` labeled "Agent's own summary · not verified". Missing fields say Unavailable and name the missing record |
+| Idle activity | `lastRun`: the most recently modified `runs/*/*.jsonl` when `status.json` names no log; static history, no animation, never attributed to the current status |
+| Outcome shelves | `todayOutcomes`: `end` records dated today (server-local) from run logs modified today, deduplicated by run/card; labeled "Today, from run logs"; not board membership |
+
+Still Unknown until the engine instrumentation PR: checks execution and
+results, structured reviewer verdicts, claim/setup/publish timing and
+sessions, failure reason (review failure vs error vs cap), outcome card
+titles, and the queue.
