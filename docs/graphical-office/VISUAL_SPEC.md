@@ -7,7 +7,7 @@ This document is the visual source of truth. Use restrained Birunidev styling: w
 ## 1. Design principles
 
 - Truth before theatre. Animate only confirmed current work; absence of evidence displays “Unknown” or “Unavailable”.
-- One worker, one active card. Reviewer desks represent three review roles, not three concurrent coding agents.
+- One worker, one active card. Reviewer desks represent three review roles, not three concurrent coding agents. Exception: with two or more telemetry-confirmed lanes, see Amendment A (one worker per lane).
 - Read the room at a glance. Current card, stage, stop state, and budgets take priority over office detail.
 - Calm by default. No decorative movement, flashing, confetti, sound, or simulated typing.
 - Color reinforces text and icons. Every result has a written label and a distinct symbol.
@@ -126,7 +126,7 @@ All props use viewBox `0 0 64 40`, 2px border-token stroke, rounded linecaps/joi
 | Review | Clipboard rect (20,2,24,17), rx=2; clip (27,0,10,4); three neutral horizontal lines |
 | Publish | Paper (20,4,24,14), two lines; upward arrow M32 12 V0 M27 5 L32 0 L37 5; badge stays unknown until evidence |
 
-Outcome shelf icon: viewBox 64×40, horizontal lines y=18,34,x=4–60; vertical uprights x=4,60,y=4–36; paper outline at (16,4,18,14). The shelf has no paper if no confirmed items. No plants, windows, wall clocks, decorative screens, or extra workers. SVG icons `aria-hidden=true`; all information is in adjacent HTML.
+Outcome shelf icon: viewBox 64×40, horizontal lines y=18,34,x=4–60; vertical uprights x=4,60,y=4–36; paper outline at (16,4,18,14). The shelf has no paper if no confirmed items. No plants, windows, wall clocks, decorative screens, or extra workers. (Lane workers under Amendment A are not extra workers.) SVG icons `aria-hidden=true`; all information is in adjacent HTML.
 
 ## 5. Characters
 
@@ -322,3 +322,14 @@ All state-specific text and dialog text in sections 6–7 are also normative. Dy
 - [ ] Offline/failed local reads preserve a clearly marked last-known view. A failed control write never flips the STOP indicator.
 
 Build deliverable: one local page, embedded SVG symbol atlas and CSS tokens, semantic HTML status/components, documented telemetry adapter mappings, and the screenshot evidence above. No generated mockups are required: the coordinate and state contracts are authoritative.
+
+## Amendment A — Parallel lanes (CTO decision, 8 November 2026)
+
+Evolves spec v1 for runs with parallel lanes. It does not change v1 behavior for zero or one lane, and it is not approval to merge or to start workers. Telemetry rules live in `TELEMETRY.md` ("Parallel lanes").
+
+1. **Source.** A lane worker is drawn only for a lane in `workers.json` that passes the pairing rule: `workers.json.updatedAt` equals `status.json.updatedAt`. Unpaired, stale, malformed or missing data draws no lane workers and shows the stated reason.
+2. **One worker per lane.** With two or more usable lanes, draw one worker per lane, using the v1 worker geometry (section 5) at that lane's last reported desk. With one lane, or none, the v1 rule (one worker, one active card) applies unchanged.
+3. **No theatre.** No simulated workers, invented lanes, fictional work animation, or walking between desks in lane mode. A lane worker is static at its last reported desk. Checks and guardrail results stay "Unknown" unless attributed telemetry exists; a lane is never shown as PASS without it.
+4. **Shared desk.** When two lanes report the same desk, both stay identifiable: each worker carries its lane name as visible HTML text, offset so neither hides the other. Identity is never conveyed by color alone and never relies on `title` or hover.
+5. **Accessibility.** Each lane's card, stage and round are in the text lane list, not only in SVG. Lane workers are `aria-hidden`; the lane list is the accessible equivalent.
+6. **Precedence.** Where this amendment conflicts with v1 wording about extra or concurrent workers (section 1 and section 4), this amendment wins for two or more lanes only.
