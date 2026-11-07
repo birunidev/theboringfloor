@@ -1288,18 +1288,69 @@ function officeState(s, st, info, curFacts, connection, stopped, sameRunTerminal
   return ["?", st ? "Status unavailable" : "Waiting for status", "warning"];
 }
 // Real `end` records from today's run logs, deduplicated with live events.
+// Only the engine's bounded pre-flight excerpt is presented as clarification
+// context. Older logs have no such field; never infer questions from a generic
+// "not ready" summary or pretend to know the card's current board status.
+function clarificationContext(raw) {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const clean = (value, limit) =>
+    typeof value === "string"
+      ? [...value.trim().replace(/\s+/g, " ")].slice(0, limit).join("")
+      : "";
+  const summary = clean(raw.summary, 500);
+  const policyBlock = clean(raw.policyBlock, 600);
+  const questions = Array.isArray(raw.questions)
+    ? raw.questions.slice(0, 8).map((q) => clean(q, 350)).filter(Boolean)
+    : [];
+  return summary || policyBlock || questions.length
+    ? { summary, policyBlock, questions }
+    : null;
+}
+
+function showClarificationContext(node, raw, card, run) {
+  node.replaceChildren();
+  const context = clarificationContext(raw);
+  if (!context) {
+    node.append(el("p", "Clarification details were not recorded for this run. Read the card's [AUTOPILOT NEEDS CLARIFICATION] comment in Birunidev Space.", "meta"));
+    return;
+  }
+  node.append(el("p", `Pre-flight reported · ${card} · run ${run} (not independently verified)`, "meta"));
+  if (context.summary) {
+    node.append(el("strong", "Why clarification is needed"), el("p", context.summary));
+  }
+  if (context.policyBlock) {
+    node.append(el("strong", "Policy or source blocker"), el("p", context.policyBlock));
+  }
+  if (context.questions.length) {
+    node.append(el("strong", "Questions to resolve"));
+    const list = el("ol");
+    for (const question of context.questions) list.append(el("li", question));
+    node.append(list);
+  }
+  node.append(el("p", "Next step: answer the questions on the card and request a new pre-flight check; no code was changed in this run.", "meta"));
+}
+
 function addOutcome(o) {
   const shelf = shelves.get(o?.kind);
   if (!shelf || typeof o.card !== "string" || typeof o.run !== "string") return;
   const key = `${o.run}:${o.card}`;
-  if (shelf.items.has(key)) return;
+  const previous = shelf.items.get(key);
+  if (previous) {
+    if (clarificationContext(o.clarification) && !previous.clarification) {
+      previous.clarification = o.clarification;
+      renderShelf(shelf);
+    }
+    return;
+  }
   const rounds = validNumber(o.rounds) ? ` · ${o.rounds} coding round${o.rounds === 1 ? "" : "s"}` : "";
   shelf.items.set(key, {
     key,
     card: o.card,
+    run: o.run,
     title: "",
     pr: typeof o.pr === "string" ? o.pr : "",
     reason: `${textOr(o.summary, "Summary unavailable")}${rounds}${o.ts ? ` · ${o.ts}` : ""}`,
+    clarification: o.clarification,
   });
   renderShelf(shelf);
 }
@@ -1446,10 +1497,12 @@ function addEvent(row, history = false) {
     const kind = n.data.kind,
       shelf = shelves.get(kind),
       key = `${context.run}:${context.card}`;
-    if (!shelf.items.has(key)) {
+    const previous = shelf.items.get(key);
+    if (!previous) {
       shelf.items.set(key, {
         key,
         card: context.card,
+        run: context.run,
         title:
           typeof n.data?.title === "string"
             ? n.data.title
@@ -1458,7 +1511,11 @@ function addEvent(row, history = false) {
               : "",
         pr: typeof n.data?.pr === "string" ? n.data.pr : "",
         reason: typeof n.msg === "string" ? n.msg : "",
+        clarification: n.data?.clarification,
       });
+      renderShelf(shelf);
+    } else if (clarificationContext(n.data?.clarification) && !previous.clarification) {
+      previous.clarification = n.data.clarification;
       renderShelf(shelf);
     }
     if (same) terminal = { ...context, kind, eventId: row.id };
@@ -1553,6 +1610,11 @@ function renderShelf(shelf) {
         node.classList.toggle("title-open", disclosure.open),
       );
       node.append(disclosure);
+      if (shelf.kind === "needs-clarification") {
+        const detail = el("section", null, "clarification-context");
+        detail.setAttribute("aria-label", "Pre-flight clarification context");
+        node.append(detail);
+      }
       const pr = validPR(value.pr);
       if (pr) {
         const link = el("a", "Open draft PR");
@@ -1567,6 +1629,14 @@ function renderShelf(shelf) {
         node.append(d);
       }
       shelf.list.append(node);
+    }
+    if (shelf.kind === "needs-clarification") {
+      showClarificationContext(
+        node.querySelector(".clarification-context"),
+        value.clarification,
+        value.card,
+        value.run || "unavailable",
+      );
     }
     node.hidden = !shelf.expanded && i >= 3;
     shelf.list.append(node);
