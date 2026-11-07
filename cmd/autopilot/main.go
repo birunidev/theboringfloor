@@ -40,11 +40,21 @@ func main() {
 }
 
 func run() error {
+	return runArgs(os.Args[1:])
+}
+
+func runArgs(args []string) error {
 	paths := runstate.Paths{Root: runstate.DefaultRoot()}
-	if len(os.Args) > 1 {
-		switch os.Args[1] {
+	if len(args) > 0 {
+		switch args[0] {
+		case "project":
+			workerArgs, err := runProjectCommand(paths, args[1:])
+			if err != nil || workerArgs == nil {
+				return err
+			}
+			args = workerArgs
 		case "stop":
-			reason := strings.Join(os.Args[2:], " ")
+			reason := strings.Join(args[1:], " ")
 			if reason == "" {
 				reason = "manual stop"
 			}
@@ -69,13 +79,22 @@ func run() error {
 		}
 	}
 
-	cfgPath := flag.String("config", filepath.Join(paths.Root, "config.json"), "config file")
-	dry := flag.Bool("dry-run", false, "pre-flight only; no board writes, no commits, no push")
-	live := flag.Bool("live", false, "allow board writes, commits, push and draft PRs")
-	once := flag.Bool("once", false, "live: work at most one card, then exit")
-	cardRef := flag.String("card", "", "dry-run: this card only (label not required)")
-	boardName := flag.String("board", "", "only this board (name or id)")
-	flag.Parse()
+	flags := flag.NewFlagSet("autopilot", flag.ContinueOnError)
+	cfgPath := flags.String("config", filepath.Join(paths.Root, "config.json"), "config file")
+	dry := flags.Bool("dry-run", false, "pre-flight only; no board writes, no commits, no push")
+	live := flags.Bool("live", false, "allow board writes, commits, push and draft PRs")
+	once := flags.Bool("once", false, "live: work at most one card, then exit")
+	cardRef := flags.String("card", "", "dry-run: this card only (label not required)")
+	boardName := flags.String("board", "", "only this board (name or id)")
+	if err := flags.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return nil
+		}
+		return err
+	}
+	if flags.NArg() != 0 {
+		return errors.New("unexpected positional arguments; use 'autopilot project help' for project commands")
+	}
 	if *dry == *live {
 		return errors.New("pass exactly one of --dry-run or --live")
 	}

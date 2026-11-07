@@ -32,6 +32,10 @@ Under the wallpaper it is real: the manager is **[Oikonomos](https://github.com/
 
 ## Install
 
+For the board-driven autopilot on this fork, see [Project CLI](docs/autopilot-projects.md)
+to register a local Git project, validate its Space board, and select one or all
+configured projects without editing JSON.
+
 One-liner — binary plus [agentmemory](https://github.com/rohitg00/agentmemory) as a reboot-safe service:
 
 ```bash
