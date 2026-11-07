@@ -13,6 +13,7 @@ type CheckResult struct {
 	ExitCode int    `json:"exitCode"`
 	Output   string `json:"output"` // tail, truncated
 	Passed   bool   `json:"passed"`
+	Note     string `json:"note,omitempty"` // e.g. "exit 5 accepted (configured)"
 }
 
 // InScope reports whether file matches one of the scope patterns. A pattern

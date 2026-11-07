@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/theboringhumane/theboringfloor/internal/autopilot/board"
@@ -28,7 +30,7 @@ type AgentFactory func(ctx context.Context, dir string, card board.Card, bc Boar
 
 // Publisher commits, pushes and opens the draft PR (see package publish).
 type Publisher interface {
-	Publish(ctx context.Context, dir, branch, base, commitMsg, prTitle, prBody string) (prURL string, err error)
+	Publish(ctx context.Context, dir, branch, base, commitMsg, prTitle, prBody string) (prURL, headSHA string, err error)
 }
 
 // Engine runs cards.
@@ -42,6 +44,9 @@ type Engine struct {
 	Pub      Publisher
 	Now      func() time.Time
 	Out      io.Writer
+	statusMu sync.Mutex
+	workers  map[string]runstate.Status
+	wtMu     sync.Mutex
 }
 
 func (e *Engine) now() time.Time {
@@ -65,6 +70,7 @@ type Resolved struct {
 	Label                                          string
 	Policy                                         string
 	ClarifyFallback                                bool
+	Lanes                                          map[string]string // configured lane name -> working list ID
 }
 
 // Resolve looks up list and label ids and assembles the board policy text.
@@ -75,7 +81,7 @@ func (e *Engine) Resolve(ctx context.Context, bc BoardConfig) (Resolved, error) 
 	}
 	r := Resolved{BC: bc, Info: info,
 		Ready: info.ListID(bc.ReadyList), Review: info.ListID(bc.ReviewList), Blocked: info.ListID(bc.BlockedList),
-		Clarify: info.ListID(bc.ClarifyList), Done: info.ListID(bc.DoneList), Label: info.LabelID(bc.Label)}
+		Clarify: info.ListID(bc.ClarifyList), Done: info.ListID(bc.DoneList), Label: info.LabelID(bc.Label), Lanes: map[string]string{}}
 	if NoLabel(bc.Label) {
 		// A dedicated queue list is the switch: every card in it is eligible.
 		r.Label = anyLabel
@@ -85,6 +91,16 @@ func (e *Engine) Resolve(ctx context.Context, bc BoardConfig) (Resolved, error) 
 		if r.Working == "" {
 			return r, fmt.Errorf("board %s: working list %q not found", info.Name, bc.WorkingList)
 		}
+	}
+	for _, lane := range bc.Lanes {
+		id := info.ListID(lane.WorkingList)
+		if id == "" {
+			return r, fmt.Errorf("board %s: lane %q working list %q not found", info.Name, lane.Name, lane.WorkingList)
+		}
+		if id == r.Done {
+			return r, fmt.Errorf("board %s: lane %q routes work into Done", info.Name, lane.Name)
+		}
+		r.Lanes[lane.Name] = id
 	}
 	switch {
 	case r.Ready == "":
@@ -258,6 +274,100 @@ func (e *Engine) dryRunCard(ctx context.Context, r Resolved, c board.Card) DryRu
 // ErrNothingToDo: no eligible card on any board.
 var ErrNothingToDo = errors.New("no eligible card")
 
+type laneJob struct {
+	key  string
+	r    Resolved
+	card board.Card
+}
+
+func laneForTitle(title string, lanes []Lane) (Lane, error) {
+	value := strings.ToLower(strings.TrimSpace(title))
+	var matches []Lane
+	for _, lane := range lanes {
+		for _, prefix := range lane.TitlePrefixes {
+			if strings.HasPrefix(value, strings.ToLower(strings.TrimSpace(prefix))) {
+				matches = append(matches, lane)
+				break
+			}
+		}
+	}
+	if len(matches) == 0 {
+		return Lane{}, errors.New("does not match any configured lane title prefix")
+	}
+	if len(matches) > 1 {
+		return Lane{}, errors.New("matches more than one configured lane")
+	}
+	return matches[0], nil
+}
+
+// TickParallel works at most one queue card in each configured lane. It plans
+// the complete batch before any board write; an unmatched or ambiguous card
+// stops the batch so routing is never guessed from prose.
+func (e *Engine) TickParallel(ctx context.Context) error {
+	if err := e.Paths.CheckStop(); err != nil {
+		return err
+	}
+	var jobs []laneJob
+	configured := false
+	for _, bc := range e.Cfg.Boards {
+		if len(bc.Lanes) == 0 {
+			continue
+		}
+		configured = true
+		r, err := e.Resolve(ctx, bc)
+		if err != nil {
+			return fmt.Errorf("board %s: %w", bc.Name, err)
+		}
+		cands, err := e.Candidates(ctx, r)
+		if err != nil {
+			return fmt.Errorf("board %s: %w", bc.Name, err)
+		}
+		selected := map[string]bool{}
+		for _, c := range cands {
+			lane, err := laneForTitle(c.Title, bc.Lanes)
+			if err != nil {
+				return fmt.Errorf("card %s: %w", c.Ref(), err)
+			}
+			if selected[lane.Name] {
+				continue
+			}
+			if err := e.Budget.Allow(c.Ref()); err != nil {
+				e.printf("skip %s: %v\n", c.Ref(), err)
+				continue
+			}
+			selected[lane.Name] = true
+			lr := r
+			lr.Working = r.Lanes[lane.Name]
+			jobs = append(jobs, laneJob{key: bc.RepoName + "/" + lane.Name, r: lr, card: c})
+		}
+	}
+	if !configured {
+		return errors.New("parallel mode requires at least one board with configured lanes")
+	}
+	if len(jobs) == 0 {
+		return ErrNothingToDo
+	}
+	errCh := make(chan error, len(jobs))
+	var wg sync.WaitGroup
+	for _, job := range jobs {
+		job := job
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if err := e.runCard(ctx, job.r, job.card, job.key); err != nil {
+				errCh <- fmt.Errorf("lane %s: %w", job.key, err)
+			}
+		}()
+	}
+	wg.Wait()
+	close(errCh)
+	var errs []error
+	for err := range errCh {
+		errs = append(errs, err)
+	}
+	return errors.Join(errs...)
+}
+
 // Tick works at most one card across all boards (live).
 func (e *Engine) Tick(ctx context.Context) error {
 	if err := e.Paths.CheckStop(); err != nil {
@@ -287,10 +397,17 @@ func (e *Engine) Tick(ctx context.Context) error {
 
 // RunCard takes one card through claim, pipeline and outcome (live).
 func (e *Engine) RunCard(ctx context.Context, r Resolved, summary board.Card) error {
+	return e.runCard(ctx, r, summary, "")
+}
+
+func (e *Engine) runCard(ctx context.Context, r Resolved, summary board.Card, lane string) error {
 	g := board.NewGuard(e.Space, r.Done)
 	c, err := e.Space.GetCard(ctx, summary.ID)
 	if err != nil {
 		return err
+	}
+	if c.ListID != r.Ready {
+		return fmt.Errorf("card %s left the ready list before claim", c.Ref())
 	}
 	runID := runstate.NewRunID(e.now())
 	log, err := e.Paths.OpenRunLog(c.Ref(), runID, e.Now)
@@ -302,11 +419,11 @@ func (e *Engine) RunCard(ctx context.Context, r Resolved, summary board.Card) er
 	setStage := func(stage string) {
 		status.Stage = stage
 		status.Tokens = e.Budget.Snapshot().Cards[c.Ref()]
-		_ = e.Paths.WriteStatus(status, e.now())
+		_ = e.writeStatus(lane, status)
 	}
 	setStage("claim")
 	defer func() {
-		_ = e.Paths.WriteStatus(runstate.Status{State: "idle", Note: "last: " + c.Ref() + " " + status.Note}, e.now())
+		_ = e.finishStatus(lane, "last: "+c.Ref()+" "+status.Note)
 	}()
 	_ = log.Write(runstate.Event{Kind: "start", Msg: "claimed " + c.Ref() + " on " + r.Info.Name})
 
@@ -324,7 +441,12 @@ func (e *Engine) RunCard(ctx context.Context, r Resolved, summary board.Card) er
 	defer cancel()
 	go e.watchStop(runCtx, cancel)
 
+	// Two lanes may share one repository object store. Serialize fetch/worktree
+	// preparation to avoid Git lock/FETCH_HEAD races, then run agents and checks
+	// concurrently in their distinct card worktrees.
+	e.wtMu.Lock()
 	wt, err := e.WT.Prepare(runCtx, e.repo(r.BC), c.Ref())
+	e.wtMu.Unlock()
 	if err != nil {
 		return e.finish(ctx, g, r, c, log, &status, handoff.Run{ID: runID, CardKey: c.Ref(), Title: c.Title, Repo: r.BC.RepoName, When: e.now()},
 			pipeline.Outcome{Kind: pipeline.Blocked, Summary: "could not prepare the worktree", Err: err}, idem)
@@ -350,14 +472,16 @@ func (e *Engine) RunCard(ctx context.Context, r Resolved, summary board.Card) er
 	}
 	defer cleanup()
 	run.Base = r.BC.Base
+	run.BaseSHA = wt.BaseSHA
 	out := pipeline.Run(runCtx, cardContext(c, r), agent, WTWorkspace{WT: wt}, CmdChecker{Dir: wt.Path, Checks: r.BC.Checks, Sandbox: &Sandbox{Worktree: wt.Path, ReadOnly: r.BC.SandboxReadOnly}}, pipeline.Config{MaxRounds: e.Cfg.MaxRounds})
 	if out.Kind == pipeline.ReadyForReview {
 		setStage("publish")
-		url, err := e.Pub.Publish(runCtx, wt.Path, wt.Branch, r.BC.Base, handoff.CommitMessage(run, out), handoff.PRTitle(run), handoff.PRBody(run, out))
+		url, head, err := e.Pub.Publish(runCtx, wt.Path, wt.Branch, r.BC.Base, handoff.CommitMessage(run, out), handoff.PRTitle(run), handoff.PRBody(run, out))
 		if err != nil {
 			out.Kind, out.Summary, out.Err = pipeline.Blocked, "passed review but publishing failed", err
 		} else {
 			run.PRURL = url
+			run.HeadSHA = head
 			run.GitHubRepo = githubRepoFromPR(url)
 			if d, err := worktree.Diff(runCtx, wt); err == nil {
 				run.Diff = d
@@ -396,6 +520,55 @@ func (e *Engine) finish(ctx context.Context, g *board.Guard, r Resolved, c board
 		return fmt.Errorf("outcome move: %w", err)
 	}
 	return nil
+}
+
+func (e *Engine) writeStatus(lane string, status runstate.Status) error {
+	now := e.now()
+	if lane == "" {
+		return e.Paths.WriteStatus(status, now)
+	}
+	e.statusMu.Lock()
+	defer e.statusMu.Unlock()
+	if e.workers == nil {
+		e.workers = map[string]runstate.Status{}
+	}
+	status.UpdatedAt = now.UTC().Format(time.RFC3339)
+	e.workers[lane] = status
+	return e.persistStatusesLocked(now, "")
+}
+
+func (e *Engine) finishStatus(lane, note string) error {
+	now := e.now()
+	if lane == "" {
+		return e.Paths.WriteStatus(runstate.Status{State: "idle", Note: note}, now)
+	}
+	e.statusMu.Lock()
+	defer e.statusMu.Unlock()
+	delete(e.workers, lane)
+	return e.persistStatusesLocked(now, note)
+}
+
+func (e *Engine) persistStatusesLocked(now time.Time, lastNote string) error {
+	keys := make([]string, 0, len(e.workers))
+	for lane := range e.workers {
+		keys = append(keys, lane)
+	}
+	sort.Strings(keys)
+	workers := make([]runstate.WorkerStatus, 0, len(keys))
+	for _, lane := range keys {
+		workers = append(workers, runstate.WorkerStatus{Lane: lane, Status: e.workers[lane]})
+	}
+	if err := e.Paths.WriteWorkers(runstate.WorkersStatus{Workers: workers}, now); err != nil {
+		return err
+	}
+	switch len(keys) {
+	case 0:
+		return e.Paths.WriteStatus(runstate.Status{State: "idle", Note: lastNote}, now)
+	case 1:
+		return e.Paths.WriteStatus(e.workers[keys[0]], now)
+	default:
+		return e.Paths.WriteStatus(runstate.Status{State: "running", Note: fmt.Sprintf("%d lanes active; see workers.json", len(keys))}, now)
+	}
 }
 
 func (e *Engine) watchStop(ctx context.Context, cancel context.CancelFunc) {

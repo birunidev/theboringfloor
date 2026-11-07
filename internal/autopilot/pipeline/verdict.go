@@ -19,24 +19,13 @@ type Preflight struct {
 	Summary            string   `json:"summary"`
 }
 
-// Finding is one reviewer finding.
+// Finding is one gate finding (or an external reviewer finding fed back).
 type Finding struct {
 	Severity string `json:"severity"` // blocker, major, minor
 	File     string `json:"file,omitempty"`
 	Line     int    `json:"line,omitempty"`
 	Issue    string `json:"issue"`
 }
-
-// Verdict is a reviewer's structured answer.
-type Verdict struct {
-	Reviewer string    `json:"-"`
-	Verdict  string    `json:"verdict"` // pass, fail
-	Findings []Finding `json:"findings"`
-	Summary  string    `json:"summary"`
-}
-
-// Passed reports a pass.
-func (v Verdict) Passed() bool { return v.Verdict == "pass" }
 
 var errNoJSON = errors.New("no JSON object in output")
 
@@ -98,49 +87,6 @@ func ParsePreflight(text string) (Preflight, error) {
 		}
 	}
 	return p, nil
-}
-
-// ParseVerdict parses a reviewer reply. Malformed or inconsistent output is
-// returned as a failing verdict, never as a pass.
-func ParseVerdict(reviewer, text string) Verdict {
-	bad := func(why string) Verdict {
-		return Verdict{Reviewer: reviewer, Verdict: "fail", Summary: "reviewer output rejected: " + why,
-			Findings: []Finding{{Severity: "blocker", Issue: "reviewer output invalid: " + why}}}
-	}
-	data, err := extractJSON(text)
-	if err != nil {
-		return bad(err.Error())
-	}
-	var v Verdict
-	if err := strictDecode(data, &v); err != nil {
-		return bad(err.Error())
-	}
-	v.Reviewer = reviewer
-	for _, f := range v.Findings {
-		switch f.Severity {
-		case "blocker", "major", "minor":
-		default:
-			return bad(fmt.Sprintf("unknown severity %q", f.Severity))
-		}
-		if strings.TrimSpace(f.Issue) == "" {
-			return bad("finding without an issue")
-		}
-	}
-	switch v.Verdict {
-	case "pass":
-		for _, f := range v.Findings {
-			if f.Severity != "minor" {
-				return bad("pass with a " + f.Severity + " finding")
-			}
-		}
-	case "fail":
-		if len(v.Findings) == 0 {
-			return bad("fail without findings")
-		}
-	default:
-		return bad(fmt.Sprintf("verdict %q", v.Verdict))
-	}
-	return v
 }
 
 func nonEmpty(xs []string) []string {

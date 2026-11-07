@@ -12,6 +12,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -138,7 +139,7 @@ func (c *Client) do(ctx context.Context, method, path string, body, out any) err
 		return err
 	}
 	if res.StatusCode < 200 || res.StatusCode >= 300 {
-		return fmt.Errorf("opencode %s %s: http %d: %s", method, path, res.StatusCode, trim(string(data), 300))
+		return &HTTPError{Method: method, Path: path, Status: res.StatusCode, Body: trim(string(data), 300)}
 	}
 	if out == nil || len(bytes.TrimSpace(data)) == 0 {
 		return nil
@@ -153,6 +154,24 @@ func (c *Client) do(ctx context.Context, method, path string, body, out any) err
 		return fmt.Errorf("opencode %s %s: %w", method, path, err)
 	}
 	return json.Unmarshal(env.Data, out)
+}
+
+// HTTPError is a non-2xx answer from opencode.
+type HTTPError struct {
+	Method, Path string
+	Status       int
+	Body         string
+}
+
+func (e *HTTPError) Error() string {
+	return fmt.Sprintf("opencode %s %s: http %d: %s", e.Method, e.Path, e.Status, e.Body)
+}
+
+// IsNotFound reports an opencode 404 (e.g. a permission request that is no
+// longer pending because its turn already ended).
+func IsNotFound(err error) bool {
+	var h *HTTPError
+	return errors.As(err, &h) && h.Status == http.StatusNotFound
 }
 
 // SessionSpec is what CreateSession needs.

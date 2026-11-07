@@ -213,10 +213,62 @@ func ChangedFiles(ctx context.Context, wt Worktree) ([]string, error) {
 	return out, nil
 }
 
-// Diff is the full patch of the card's changes against its base, including
-// uncommitted edits (untracked files are listed by ChangedFiles, not here).
+// markUntracked records untracked files as intent-to-add so `git diff`
+// includes new files. It stages no content; the commit still decides.
+func markUntracked(ctx context.Context, wt Worktree) error {
+	untracked, err := git(ctx, wt.Path, "ls-files", "--others", "--exclude-standard", "-z")
+	if err != nil {
+		return err
+	}
+	var files []string
+	for _, f := range strings.Split(untracked, "\x00") {
+		if f != "" {
+			files = append(files, f)
+		}
+	}
+	if len(files) == 0 {
+		return nil
+	}
+	_, err = git(ctx, wt.Path, append([]string{"add", "--intent-to-add", "--"}, files...)...)
+	return err
+}
+
+// Diff is the full patch of the card's changes against its base: committed,
+// staged, unstaged and new (untracked) files.
 func Diff(ctx context.Context, wt Worktree) (string, error) {
+	if err := markUntracked(ctx, wt); err != nil {
+		return "", err
+	}
 	return git(ctx, wt.Path, "diff", wt.BaseSHA)
+}
+
+// DiffCheck runs `git diff --check` against the base (whitespace errors and
+// leftover conflict markers), including new files. ok is false when git
+// reports problems; output holds its report.
+func DiffCheck(ctx context.Context, wt Worktree) (output string, ok bool, err error) {
+	if err := markUntracked(ctx, wt); err != nil {
+		return "", false, err
+	}
+	cmd := exec.CommandContext(ctx, "git", "diff", "--check", wt.BaseSHA)
+	cmd.Dir = wt.Path
+	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+	var out bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &out, &out
+	runErr := cmd.Run()
+	var ee *exec.ExitError
+	switch {
+	case runErr == nil:
+		return "", true, nil
+	case errors.As(runErr, &ee) && ee.ExitCode() == 2:
+		return strings.TrimSpace(out.String()), false, nil
+	default:
+		return strings.TrimSpace(out.String()), false, fmt.Errorf("git diff --check: %w", runErr)
+	}
+}
+
+// HeadSHA returns the worktree's current HEAD commit.
+func HeadSHA(ctx context.Context, wt Worktree) (string, error) {
+	return git(ctx, wt.Path, "rev-parse", "HEAD")
 }
 
 func git(ctx context.Context, dir string, args ...string) (string, error) {

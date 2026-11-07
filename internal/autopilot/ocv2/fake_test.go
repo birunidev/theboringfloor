@@ -29,6 +29,7 @@ type fakeV2 struct {
 	created    map[string]any
 	interrupts int
 	seq        int
+	gone       map[string]bool // permission ids answered with 404
 }
 
 func newFake(t *testing.T) (*fakeV2, *httptest.Server) {
@@ -70,6 +71,17 @@ func (f *fakeV2) serve(w http.ResponseWriter, r *http.Request) {
 		f.write(w, f.pending)
 	case r.Method == http.MethodPost && strings.HasPrefix(path, "/api/session/ses_1/permission/"):
 		rid := strings.TrimSuffix(strings.TrimPrefix(path, "/api/session/ses_1/permission/"), "/reply")
+		if f.gone[rid] {
+			for i, p := range f.pending {
+				if p.ID == rid {
+					f.pending = append(f.pending[:i], f.pending[i+1:]...)
+					break
+				}
+			}
+			w.WriteHeader(http.StatusNotFound)
+			w.Write([]byte(`{"_tag":"PermissionNotFoundError"}`))
+			return
+		}
 		var body map[string]string
 		_ = json.NewDecoder(r.Body).Decode(&body)
 		f.replies[rid] = body["decision"]

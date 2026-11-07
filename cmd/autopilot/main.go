@@ -3,6 +3,7 @@
 //	autopilot --dry-run [--board NAME] [--card BII-123]   pre-flight only, no board writes, no push
 //	autopilot --live --once                               work at most one card, then exit
 //	autopilot --live                                      loop forever (poll interval from config)
+//	autopilot --live --parallel                           one card per configured lane concurrently
 //	autopilot stop "reason" | resume | status
 //
 // Config: ~/.theboringfloor/autopilot/config.json (see internal/autopilot/engine).
@@ -19,6 +20,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -73,6 +75,7 @@ func run() error {
 	dry := flag.Bool("dry-run", false, "pre-flight only; no board writes, no commits, no push")
 	live := flag.Bool("live", false, "allow board writes, commits, push and draft PRs")
 	once := flag.Bool("once", false, "live: work at most one card, then exit")
+	parallel := flag.Bool("parallel", false, "live: work at most one card per configured lane concurrently")
 	cardRef := flag.String("card", "", "dry-run: this card only (label not required)")
 	boardName := flag.String("board", "", "only this board (name or id)")
 	flag.Parse()
@@ -81,6 +84,9 @@ func run() error {
 	}
 	if *cardRef != "" && !*dry {
 		return errors.New("--card is for --dry-run only; live runs pick labelled cards")
+	}
+	if *parallel && !*live {
+		return errors.New("--parallel requires --live")
 	}
 
 	cfg, err := engine.LoadConfig(*cfgPath)
@@ -123,7 +129,7 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	space := spaceboard.New(spaceboard.NewTokenSource(spaceboard.DefaultAuthFile(), ""))
+	space := &lockedSpace{SpaceAPI: spaceboard.New(spaceboard.NewTokenSource(spaceboard.DefaultAuthFile(), ""))}
 	e := &engine.Engine{
 		Cfg: cfg, Paths: paths, Space: space, Budget: budget,
 		WT:  worktree.Manager{Root: paths.WorktreesDir(), Fetch: true},
@@ -161,7 +167,12 @@ func run() error {
 	}
 
 	for {
-		err := e.Tick(ctx)
+		var err error
+		if *parallel {
+			err = e.TickParallel(ctx)
+		} else {
+			err = e.Tick(ctx)
+		}
 		switch {
 		case errors.Is(err, runstate.ErrStopped):
 			fmt.Println("kill switch is set; exiting")
@@ -187,6 +198,44 @@ func run() error {
 		case <-time.After(cfg.Poll.Duration):
 		}
 	}
+}
+
+// lockedSpace serializes the short board API calls while model/check work runs
+// concurrently. The MCP client has one session and OAuth refresh source; this
+// avoids parallel re-initialization or token write-back races.
+type lockedSpace struct {
+	engine.SpaceAPI
+	mu sync.Mutex
+}
+
+func (s *lockedSpace) ListCards(ctx context.Context, boardID, listID string) ([]board.Card, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.SpaceAPI.ListCards(ctx, boardID, listID)
+}
+
+func (s *lockedSpace) GetCard(ctx context.Context, cardID string) (board.Card, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.SpaceAPI.GetCard(ctx, cardID)
+}
+
+func (s *lockedSpace) MoveCard(ctx context.Context, cardID, listID, idemKey string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.SpaceAPI.MoveCard(ctx, cardID, listID, idemKey)
+}
+
+func (s *lockedSpace) AddComment(ctx context.Context, cardID, body, idemKey string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.SpaceAPI.AddComment(ctx, cardID, body, idemKey)
+}
+
+func (s *lockedSpace) GetBoard(ctx context.Context, boardID string) (spaceboard.BoardInfo, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.SpaceAPI.GetBoard(ctx, boardID)
 }
 
 func printDry(r engine.DryRunResult) {
@@ -228,14 +277,15 @@ func indent(s, p string) string {
 // gitPublisher commits, pushes the autopilot branch and opens a draft PR.
 type gitPublisher struct{}
 
-func (gitPublisher) Publish(ctx context.Context, dir, branch, base, msg, title, body string) (string, error) {
+func (gitPublisher) Publish(ctx context.Context, dir, branch, base, msg, title, body string) (string, string, error) {
 	t := publish.Target{Dir: dir, Branch: branch, Base: base}
-	if _, _, err := publish.Commit(ctx, t, msg); err != nil {
-		return "", err
+	head, _, err := publish.Commit(ctx, t, msg)
+	if err != nil {
+		return "", "", err
 	}
 	if err := publish.Push(ctx, t); err != nil {
-		return "", err
+		return "", "", err
 	}
 	url, _, err := publish.DraftPR(ctx, t, title, body)
-	return url, err
+	return url, head, err
 }

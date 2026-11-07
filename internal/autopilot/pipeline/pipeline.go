@@ -1,7 +1,11 @@
-// Package pipeline runs one card through the autopilot's stages:
+// Package pipeline runs one card through the autopilot's coding sprint:
 //
-//	pre-flight (read-only) -> implementer -> code gates + 3 independent
-//	reviewers -> up to MaxRounds fix rounds -> Ready for review | Blocked
+//	pre-flight (read-only) -> implementer -> sandboxed checks + deterministic
+//	gates (scope, sensitive files, empty diff, git diff --check) -> up to
+//	MaxRounds fix rounds -> Ready for review | Blocked
+//
+// Review is NOT done here. A passing card becomes a draft PR plus an evidence
+// packet for external review (founder / ChatGPT / CTO on the board).
 //
 // It depends only on small interfaces (Agent, Workspace, Checker), so it
 // is tested with fakes; cmd/autopilot wires them to opencode and git.
@@ -9,10 +13,8 @@ package pipeline
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
-	"sync"
 )
 
 // Role tells the Agent which permission profile a session gets.
@@ -21,7 +23,6 @@ type Role string
 const (
 	RolePreflight Role = "preflight" // read-only, Space reads allowed
 	RoleImplement Role = "implement" // writes inside scope, allowlisted checks
-	RoleReview    Role = "review"    // read-only, no Space
 )
 
 // StageRequest is one agent turn.
@@ -39,8 +40,7 @@ type StageResponse struct {
 	Session string
 }
 
-// Agent runs stage turns. Implementations must be safe for concurrent use:
-// the three reviewers run in parallel, each in its own fresh session.
+// Agent runs stage turns.
 type Agent interface {
 	Run(ctx context.Context, req StageRequest) (StageResponse, error)
 }
@@ -49,6 +49,9 @@ type Agent interface {
 type Workspace interface {
 	ChangedFiles(ctx context.Context) ([]string, error)
 	Diff(ctx context.Context) (string, error)
+	// DiffCheck runs `git diff --check` against the base; ok=false means
+	// whitespace errors or conflict markers were found.
+	DiffCheck(ctx context.Context) (output string, ok bool, err error)
 }
 
 // Checker runs the repository's tests/lint/build deterministically.
@@ -76,36 +79,16 @@ type Round struct {
 	Implementer string // implementer's own summary (unverified)
 	Files       []string
 	Checks      []CheckResult
+	DiffCheckOK bool
+	DiffCheck   string // `git diff --check` report when not OK
 	Gates       []Finding
-	Verdicts    []Verdict
 }
 
-// Passed reports whether the round passed every gate and reviewer.
-func (r Round) Passed() bool {
-	if len(r.Gates) > 0 || len(r.Verdicts) == 0 {
-		return false
-	}
-	for _, v := range r.Verdicts {
-		if !v.Passed() {
-			return false
-		}
-	}
-	return true
-}
+// Passed reports whether the round passed every deterministic gate.
+func (r Round) Passed() bool { return len(r.Gates) == 0 }
 
-// Findings returns blocker/major findings of the round (gates first).
-func (r Round) Findings() []Finding {
-	out := append([]Finding(nil), r.Gates...)
-	for _, v := range r.Verdicts {
-		for _, f := range v.Findings {
-			if f.Severity != "minor" {
-				f.Issue = "(" + v.Reviewer + ") " + f.Issue
-				out = append(out, f)
-			}
-		}
-	}
-	return out
-}
+// Findings returns the round's gate findings.
+func (r Round) Findings() []Finding { return append([]Finding(nil), r.Gates...) }
 
 // Outcome is the pipeline's result for one card.
 type Outcome struct {
@@ -123,9 +106,6 @@ func (o Outcome) Last() (Round, bool) {
 	}
 	return o.Rounds[len(o.Rounds)-1], true
 }
-
-// Reviewers is the fixed review panel.
-var Reviewers = []string{ReviewerAC, ReviewerChecks, ReviewerScope}
 
 // Run takes one card from pre-flight to an outcome. It never moves cards,
 // commits or pushes; the caller acts on the Outcome.
@@ -179,53 +159,33 @@ func Run(ctx context.Context, card CardContext, agent Agent, ws Workspace, check
 			return abort(out, "could not run checks", err)
 		}
 		r.Gates = CodeGates(r.Files, p.ScopePaths, r.Checks)
-
-		in := ReviewInput{Card: card, Pre: p, Files: r.Files, Diff: diff, Checks: r.Checks, Round: n, Previous: prev}
-		r.Verdicts, err = review(ctx, agent, in)
+		if strings.TrimSpace(diff) == "" && len(r.Files) > 0 {
+			r.Gates = append(r.Gates, Finding{Severity: "blocker", Issue: "files changed but the diff is empty; evidence would be incomplete"})
+		}
+		check, ok, err := ws.DiffCheck(ctx)
 		if err != nil {
-			out.Rounds = append(out.Rounds, r)
-			return abort(out, fmt.Sprintf("a reviewer failed in round %d", n), err)
+			return abort(out, "could not run git diff --check", err)
+		}
+		r.DiffCheckOK, r.DiffCheck = ok, check
+		if !ok {
+			r.Gates = append(r.Gates, Finding{Severity: "blocker", Issue: "git diff --check reported problems: " + tail(check, 600)})
 		}
 		out.Rounds = append(out.Rounds, r)
 		if r.Passed() {
 			out.Kind = ReadyForReview
-			out.Summary = fmt.Sprintf("passed all gates and %d reviewers in round %d", len(Reviewers), n)
+			out.Summary = fmt.Sprintf("passed sandboxed checks and gates in round %d; awaiting external review", n)
 			return out
 		}
 		prev = r.Findings()
 	}
 	out.Kind = Blocked
-	out.Summary = fmt.Sprintf("still failing after %d review rounds", cfg.MaxRounds)
+	out.Summary = fmt.Sprintf("still failing checks or gates after %d rounds", cfg.MaxRounds)
 	return out
 }
 
 func abort(o Outcome, why string, err error) Outcome {
 	o.Kind, o.Summary, o.Err = Blocked, why, err
 	return o
-}
-
-// review runs the panel in parallel, each reviewer in a fresh session.
-func review(ctx context.Context, agent Agent, in ReviewInput) ([]Verdict, error) {
-	verdicts := make([]Verdict, len(Reviewers))
-	errs := make([]error, len(Reviewers))
-	var wg sync.WaitGroup
-	for i, name := range Reviewers {
-		wg.Add(1)
-		go func(i int, name string) {
-			defer wg.Done()
-			res, err := agent.Run(ctx, StageRequest{Role: RoleReview, Name: "review:" + name, Prompt: ReviewPrompt(name, in)})
-			if err != nil {
-				errs[i] = fmt.Errorf("%s: %w", name, err)
-				return
-			}
-			verdicts[i] = ParseVerdict(name, res.Text)
-		}(i, name)
-	}
-	wg.Wait()
-	if err := errors.Join(errs...); err != nil {
-		return verdicts, err
-	}
-	return verdicts, nil
 }
 
 // FindingsText renders findings as a bullet list for comments and logs.

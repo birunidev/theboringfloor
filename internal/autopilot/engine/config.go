@@ -18,6 +18,18 @@ import (
 type Check struct {
 	Name string   `json:"name"`
 	Argv []string `json:"argv"`
+	// AllowExit lists non-zero exit codes that still count as a pass and are
+	// noted in the evidence (e.g. pytest 5 = "no tests collected").
+	AllowExit []int `json:"allow_exit,omitempty"`
+}
+
+// Lane routes explicitly named card-title prefixes to one board working list.
+// It is only used by the opt-in parallel live loop. Prefix routing is strict so
+// a queue card cannot be guessed into frontend or backend work.
+type Lane struct {
+	Name          string   `json:"name"`
+	TitlePrefixes []string `json:"title_prefixes"`
+	WorkingList   string   `json:"working_list"`
 }
 
 // BoardConfig maps one Space board to one repository.
@@ -42,6 +54,7 @@ type BoardConfig struct {
 	SandboxReadOnly []string `json:"sandbox_read_only"`
 	// Setup commands run in a fresh worktree before checks (e.g. symlink deps).
 	Setup []Check `json:"setup"`
+	Lanes []Lane  `json:"lanes,omitempty"`
 }
 
 // Config is ~/.theboringfloor/autopilot/config.json.
@@ -141,6 +154,33 @@ func (c Config) Validate() error {
 		for _, l := range []string{b.ReadyList, b.WorkingList, b.ReviewList, b.BlockedList, b.ClarifyList} {
 			if strings.EqualFold(strings.TrimSpace(l), strings.TrimSpace(b.DoneList)) {
 				return fmt.Errorf("config: board %q routes cards into its Done list %q", b.Name, l)
+			}
+		}
+		seenLane := map[string]bool{}
+		var prefixes []struct{ lane, value string }
+		for _, lane := range b.Lanes {
+			name := strings.ToLower(strings.TrimSpace(lane.Name))
+			if name == "" || seenLane[name] {
+				return fmt.Errorf("config: board %q has an empty or duplicate lane name %q", b.Name, lane.Name)
+			}
+			seenLane[name] = true
+			if strings.TrimSpace(lane.WorkingList) == "" || strings.EqualFold(strings.TrimSpace(lane.WorkingList), strings.TrimSpace(b.DoneList)) {
+				return fmt.Errorf("config: lane %q needs a non-Done working_list", lane.Name)
+			}
+			if len(lane.TitlePrefixes) == 0 {
+				return fmt.Errorf("config: lane %q needs explicit title_prefixes", lane.Name)
+			}
+			for _, raw := range lane.TitlePrefixes {
+				p := strings.ToLower(strings.TrimSpace(raw))
+				if p == "" {
+					return fmt.Errorf("config: lane %q has an empty title prefix", lane.Name)
+				}
+				for _, prior := range prefixes {
+					if strings.HasPrefix(p, prior.value) || strings.HasPrefix(prior.value, p) {
+						return fmt.Errorf("config: lane prefixes %q (%s) and %q (%s) overlap", prior.value, prior.lane, p, lane.Name)
+					}
+				}
+				prefixes = append(prefixes, struct{ lane, value string }{lane.Name, p})
 			}
 		}
 	}

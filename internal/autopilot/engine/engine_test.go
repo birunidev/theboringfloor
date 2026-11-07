@@ -7,7 +7,9 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/theboringhumane/theboringfloor/internal/autopilot/board"
 	"github.com/theboringhumane/theboringfloor/internal/autopilot/pipeline"
@@ -47,9 +49,9 @@ func (a *scriptAgent) Run(_ context.Context, req pipeline.StageRequest) (pipelin
 
 type fakePub struct{ calls int }
 
-func (p *fakePub) Publish(context.Context, string, string, string, string, string, string) (string, error) {
+func (p *fakePub) Publish(context.Context, string, string, string, string, string, string) (string, string, error) {
 	p.calls++
-	return "https://github.com/birunidev/birunidev-space/pull/99", nil
+	return "https://github.com/birunidev/birunidev-space/pull/99", "abc123head", nil
 }
 
 func gitRepo(t *testing.T) string {
@@ -163,6 +165,10 @@ func TestLiveReadyGoesToReviewNeverDone(t *testing.T) {
 	if len(comments) != 2 || !strings.Contains(comments[0], "AUTOPILOT CLAIMED") || !strings.Contains(comments[1], "AUTOPILOT REVIEW PACKET v1") || !strings.Contains(comments[1], "/pull/99") {
 		t.Fatalf("comments = %q", comments)
 	}
+	if !strings.Contains(comments[1], "HEAD SHA: abc123head") || strings.Contains(comments[1], "BASE SHA: Unavailable") ||
+		!strings.Contains(comments[1], "git diff --check") || !strings.Contains(comments[1], "+x = 2") {
+		t.Fatalf("evidence packet incomplete:\n%s", comments[1])
+	}
 	if c2, _ := fb.GetCard(context.Background(), "c2"); c2.ListID != "l-todo" || len(fb.Comments["c2"]) != 0 {
 		t.Fatal("unlabelled card was touched")
 	}
@@ -250,5 +256,121 @@ func TestConfigRefusesDoneRouting(t *testing.T) {
 	c.Defaults()
 	if err := c.Validate(); err == nil {
 		t.Fatal("a config routing cards into Done must be refused")
+	}
+}
+
+type laneBarrierAgent struct {
+	active  *atomic.Int32
+	entered chan<- struct{}
+	release <-chan struct{}
+}
+
+func (a laneBarrierAgent) Run(ctx context.Context, req pipeline.StageRequest) (pipeline.StageResponse, error) {
+	if req.Role != pipeline.RolePreflight {
+		return pipeline.StageResponse{}, errors.New("unexpected implement stage")
+	}
+	a.active.Add(1)
+	a.entered <- struct{}{}
+	select {
+	case <-a.release:
+		return pipeline.StageResponse{Text: notReadyPre}, nil
+	case <-ctx.Done():
+		return pipeline.StageResponse{}, ctx.Err()
+	}
+}
+
+func TestParallelLanesRunFrontendAndBackendTogether(t *testing.T) {
+	repo := gitRepo(t)
+	info := spaceboard.BoardInfo{ID: "b", Name: "V2 Engineering", Description: "founder gates apply", Lists: []spaceboard.List{
+		{ID: "queue", Name: "Autopilot Queue"}, {ID: "fe", Name: "Frontend In Progress"}, {ID: "be", Name: "Backend In Progress"},
+		{ID: "review", Name: "Review"}, {ID: "hold", Name: "On Hold"}, {ID: "clarify", Name: "Needs Clarification"}, {ID: "done", Name: "Done"},
+	}}
+	fb := board.NewFake(
+		board.Card{ID: "c-fe", Key: "BII-FE", BoardID: "b", ListID: "queue", Title: "[V2 FE P0] frontend slice"},
+		board.Card{ID: "c-be", Key: "BII-BE", BoardID: "b", ListID: "queue", Title: "[V2 BE P0] backend slice"},
+	)
+	paths := runstate.Paths{Root: filepath.Join(t.TempDir(), "ap")}
+	if err := paths.Ensure(); err != nil {
+		t.Fatal(err)
+	}
+	budget, _ := runstate.OpenBudget(paths.UsageFile(), 0, 0, nil)
+	cfg := Config{Boards: []BoardConfig{{
+		BoardID: "b", Name: "V2 Engineering", RepoName: "space", RepoDir: repo, Base: "main", ReadyList: "Autopilot Queue",
+		ReviewList: "Review", BlockedList: "On Hold", ClarifyList: "Needs Clarification", DoneList: "Done", Label: "none",
+		Lanes: []Lane{{Name: "frontend", TitlePrefixes: []string{"[V2 FE"}, WorkingList: "Frontend In Progress"}, {Name: "backend", TitlePrefixes: []string{"[V2 BE"}, WorkingList: "Backend In Progress"}},
+	}}}
+	cfg.Defaults()
+	entered, release := make(chan struct{}, 2), make(chan struct{})
+	var active atomic.Int32
+	e := &Engine{Cfg: cfg, Paths: paths, Space: fakeSpace{Fake: fb, info: info}, Budget: budget,
+		WT: worktree.Manager{Root: paths.WorktreesDir()}, Pub: &fakePub{},
+		NewAgent: func(context.Context, string, board.Card, BoardConfig, []string, *runstate.RunLog, func(string)) (pipeline.Agent, func(), error) {
+			return laneBarrierAgent{active: &active, entered: entered, release: release}, func() {}, nil
+		}}
+	done := make(chan error, 1)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	go func() { done <- e.TickParallel(ctx) }()
+	for i := 0; i < 2; i++ {
+		select {
+		case <-entered:
+		case <-ctx.Done():
+			t.Fatal("frontend and backend did not reach pre-flight concurrently")
+		}
+	}
+	if active.Load() != 2 {
+		t.Fatalf("active agents = %d", active.Load())
+	}
+	workers, err := paths.ReadWorkers()
+	if err != nil || len(workers.Workers) != 2 || workers.Workers[0].Lane != "space/backend" || workers.Workers[1].Lane != "space/frontend" {
+		t.Fatalf("workers = %+v err=%v", workers, err)
+	}
+	legacy, _ := paths.ReadStatus()
+	if legacy.State != "running" || !strings.Contains(legacy.Note, "2 lanes active") {
+		t.Fatalf("legacy status = %+v", legacy)
+	}
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	seenWorking := map[string]bool{}
+	for _, m := range fb.Moves {
+		if m.ListID == "fe" || m.ListID == "be" {
+			seenWorking[m.ListID] = true
+		}
+		if m.ListID == "done" {
+			t.Fatal("parallel lane moved a card to Done")
+		}
+	}
+	if !seenWorking["fe"] || !seenWorking["be"] {
+		t.Fatalf("lane working moves = %v", fb.Moves)
+	}
+}
+
+func TestParallelLaneRoutingFailsClosedBeforeBoardWrites(t *testing.T) {
+	e, fb, _, _ := setup(t, notReadyPre, allLists, nil)
+	e.Cfg.Boards[0].ReadyList = "Todo"
+	e.Cfg.Boards[0].Lanes = []Lane{{Name: "frontend", TitlePrefixes: []string{"[V2 FE"}, WorkingList: "Review"}}
+	if err := e.TickParallel(context.Background()); err == nil || !strings.Contains(err.Error(), "does not match any configured lane") {
+		t.Fatalf("err = %v", err)
+	}
+	if len(fb.Comments) != 0 || len(fb.Moves) != 0 {
+		t.Fatalf("ambiguous plan wrote to board: comments=%v moves=%v", fb.Comments, fb.Moves)
+	}
+}
+
+func TestConfigRefusesOverlappingLanePrefixesAndDone(t *testing.T) {
+	base := BoardConfig{BoardID: "b", RepoName: "r", RepoDir: "/x", ReadyList: "Autopilot Queue", Label: "none"}
+	base.Lanes = []Lane{{Name: "frontend", TitlePrefixes: []string{"[V2"}, WorkingList: "Frontend In Progress"}, {Name: "backend", TitlePrefixes: []string{"[V2 BE"}, WorkingList: "Backend In Progress"}}
+	c := Config{Boards: []BoardConfig{base}}
+	c.Defaults()
+	if err := c.Validate(); err == nil || !strings.Contains(err.Error(), "overlap") {
+		t.Fatalf("overlapping prefixes accepted: %v", err)
+	}
+	base.Lanes = []Lane{{Name: "backend", TitlePrefixes: []string{"[V2 BE"}, WorkingList: "Done"}}
+	c = Config{Boards: []BoardConfig{base}}
+	c.Defaults()
+	if err := c.Validate(); err == nil || !strings.Contains(err.Error(), "non-Done") {
+		t.Fatalf("Done lane accepted: %v", err)
 	}
 }
