@@ -1327,7 +1327,7 @@ function showClarificationContext(node, raw, card, run) {
     for (const question of context.questions) list.append(el("li", question));
     node.append(list);
   }
-  node.append(el("p", "Next step: answer the questions on the card and request a new pre-flight check; no code was changed in this run.", "meta"));
+  node.append(el("p", "Next step: resolve the listed blocker, answer any questions on the card, then request a new pre-flight check. No code was changed in this run.", "meta"));
 }
 
 function addOutcome(o) {
