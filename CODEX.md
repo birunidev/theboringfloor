@@ -143,7 +143,25 @@ Cards created for the autopilot:
    - A shell request `ls -la a b c` was rejected for metacharacters in BII-811's run: inspect the logged resource and decide whether harmless forms should pass (keep `;&|$<>` and backticks banned).
    - `bin/autopilot --live` as a long-running service (systemd user unit) **only with explicit founder approval**.
 
-8. **Optional, bigger: port the TUI's opencode backend to v2** (`internal/backend/opencode.go` speaks v1). `internal/autopilot/ocv2` is the reference client. Only if the founder asks; `tbo-v1` works today.
+8. **Graphical office view (2D, in the browser).** New `cmd/officeview`. **Do not start until `docs/graphical-office/VISUAL_SPEC.md` exists**: the founder is standardizing the visuals with ChatGPT first. Build exactly to that spec; where it is silent, ask instead of inventing a style.
+   - **What it is:** a local, read-only 2D "office" that animates the autopilot. Cards arrive at the queue desk, a worker sprite carries one through pre-flight → implement → checks → three reviewer desks → outcome (Review / Needs Clarification / On Hold), with tokens, round and kill-switch state visible.
+   - **Server:** Go, `net/http`, bound to `127.0.0.1` only (refuse other bind addresses). Static assets via `embed` (HTML/CSS/JS, sprites); **no CDN or external requests**. Endpoints:
+     - `GET /api/state`: merged `status.json`, today's and per-card tokens vs caps from `usage.json` and config, STOP set or not, board names, and the list of recent runs from `runs/*/`
+     - `GET /api/events`: Server-Sent Events tailing the current run log (`status.json.logPath`), one JSON event per line; follow the file switch when a new run starts
+     - optional `POST /api/stop` and `/api/resume`, calling `runstate.Paths.SetStop` / `ClearStop`, protected by a random per-process token embedded in the page plus an `Origin` check
+
+     Nothing else writes.
+   - **Data mapping:** derive animation states only from real fields:
+     - `status.json`: `state`, `card`, `title`, `stage`, `round`, `tokens`, `note`
+     - run-log `kind`: `start`, `stage`, `stage-done`, `permission` (allow / reject, action), `tokens`, `verdict`, `error`, `end` with `data.kind` (ready-for-review / needs-clarification / blocked)
+     - stage names: `claim`, `setup`, `preflight`, `implement:N`, `review:acceptance-criteria`, `review:tests-lint-build`, `review:diff-scope`, `publish`
+
+     Never fabricate activity: idle means idle.
+   - **Secrets:** run logs may contain model output; render text escaped (no `innerHTML` with raw strings), and never expose files outside `~/.theboringfloor/autopilot`.
+   - **Tests:** handler tests with a temp autopilot home (state merge, SSE tail across a log rotation, the 127.0.0.1-only bind, token/Origin check on POSTs, path traversal refused). Plus a headless screenshot check of the page at desktop and phone widths, using the repo's existing headless tooling or Playwright if installed.
+   - **Run:** `go run ./cmd/officeview` → prints `http://127.0.0.1:<port>`. Add it to the README's autopilot section.
+
+9. **Optional, bigger: port the TUI's opencode backend to v2** (`internal/backend/opencode.go` speaks v1). `internal/autopilot/ocv2` is the reference client. Only if the founder asks; `tbo-v1` works today.
 
 ---
 
