@@ -74,23 +74,27 @@ func TestBrowserLeftSlotRegistration(t *testing.T) {
 	m := New(&recBackend{}, nil)
 	m = runMsg(t, m, tea.WindowSizeMsg{Width: 180, Height: 30})
 
-	// the right strip keeps its seven tabs; the browser is NOT one.
+	// The browser stays on the left; git keeps its existing right-strip index.
 	if !m.SelectTab("git") || m.ActiveTabIndex() != 6 {
 		t.Fatalf("git must stay at index 6, got %d", m.ActiveTabIndex())
 	}
 	if m.SelectTab("browser") {
 		t.Fatalf("the browser must NOT ride the right strip anymore")
 	}
-	// the cycle wraps git → chat (no browser stop in the strip).
+	// Files now lead to the appended autopilot panel, then wrap to chat.
 	m.tabs.SetActive(7)
 	m = runMsg(t, m, tea.KeyPressMsg(tea.Key{Code: tea.KeyTab}))
-	if got := m.ActiveTabIndex(); got != 0 {
-		t.Fatalf("tab from files (7) → %d, want 0 (wrap to chat)", got)
+	if got := m.ActiveTabIndex(); got != 8 {
+		t.Fatalf("tab from files = %d, want autopilot (8)", got)
 	}
-	// and shift+tab from chat lands ON git.
+	m = runMsg(t, m, tea.KeyPressMsg(tea.Key{Code: tea.KeyTab}))
+	if got := m.ActiveTabIndex(); got != 0 {
+		t.Fatalf("tab from autopilot (8) → %d, want 0 (wrap to chat)", got)
+	}
+	// Shift+tab from chat lands on autopilot.
 	m = runMsg(t, m, tea.KeyPressMsg(tea.Key{Code: tea.KeyTab, Mod: tea.ModShift}))
-	if got := m.ActiveTabIndex(); got != 7 {
-		t.Fatalf("shift+tab from chat → %d, want 7 (files)", got)
+	if got := m.ActiveTabIndex(); got != 8 {
+		t.Fatalf("shift+tab from chat → %d, want 8 (autopilot)", got)
 	}
 	// the left slot defaults to the floor; ctrl+b flips it BOTH ways.
 	if m.LeftTabIndex() != leftTabFloor {
