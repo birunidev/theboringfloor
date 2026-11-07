@@ -30,6 +30,7 @@ func (p Paths) StopFile() string     { return filepath.Join(p.Root, "STOP") }
 func (p Paths) LockFile() string     { return filepath.Join(p.Root, "autopilot.lock") }
 func (p Paths) UsageFile() string    { return filepath.Join(p.Root, "usage.json") }
 func (p Paths) StatusFile() string   { return filepath.Join(p.Root, "status.json") }
+func (p Paths) WorkersFile() string  { return filepath.Join(p.Root, "workers.json") }
 func (p Paths) RunsDir() string      { return filepath.Join(p.Root, "runs") }
 func (p Paths) WorktreesDir() string { return filepath.Join(p.Root, "worktrees") }
 

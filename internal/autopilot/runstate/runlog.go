@@ -36,6 +36,20 @@ type Status struct {
 	LogPath   string `json:"logPath,omitempty"`
 }
 
+// WorkerStatus is one live lane in workers.json. Status remains the exact
+// single-worker schema used by status.json for backward compatibility.
+type WorkerStatus struct {
+	Lane string `json:"lane"`
+	Status
+}
+
+// WorkersStatus is the multi-worker status contract for local monitors.
+type WorkersStatus struct {
+	Version   int            `json:"version"`
+	UpdatedAt string         `json:"updatedAt"`
+	Workers   []WorkerStatus `json:"workers"`
+}
+
 // RunLog appends events for one run to runs/<card>/<run>.jsonl.
 type RunLog struct {
 	mu   sync.Mutex
@@ -107,6 +121,25 @@ func (p Paths) ReadStatus() (Status, error) {
 	if os.IsNotExist(err) {
 		return Status{State: "idle"}, nil
 	}
+	if err != nil {
+		return s, err
+	}
+	return s, json.Unmarshal(data, &s)
+}
+
+// WriteWorkers atomically replaces workers.json. Callers provide workers in a
+// stable order so browser updates and tests do not churn.
+func (p Paths) WriteWorkers(s WorkersStatus, now time.Time) error {
+	s.Version = 1
+	s.UpdatedAt = now.UTC().Format(time.RFC3339)
+	return writeJSONAtomic(p.WorkersFile(), s)
+}
+
+// ReadWorkers reads workers.json. Absence means no parallel-lane run has been
+// recorded, not an empty or completed lane.
+func (p Paths) ReadWorkers() (WorkersStatus, error) {
+	var s WorkersStatus
+	data, err := os.ReadFile(p.WorkersFile())
 	if err != nil {
 		return s, err
 	}
