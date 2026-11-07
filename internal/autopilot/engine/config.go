@@ -93,12 +93,8 @@ func (c *Config) Defaults() {
 	if c.Model == "" {
 		c.Model = "opencode-go/muse-spark-1.3-contributor"
 	}
-	if c.PerCardTokens == 0 {
-		c.PerCardTokens = 2_000_000
-	}
-	if c.DailyTokens == 0 {
-		c.DailyTokens = 10_000_000
-	}
+	// Token caps must be explicitly configured. The budget ledger treats
+	// nonpositive limits as disabled; never silently default a zero cap.
 	if c.RunTimeout.Duration == 0 {
 		c.RunTimeout.Duration = 45 * time.Minute
 	}
@@ -183,6 +179,12 @@ func (c Config) Validate() error {
 				prefixes = append(prefixes, struct{ lane, value string }{lane.Name, p})
 			}
 		}
+	}
+	if c.PerCardTokens <= 0 {
+		return errors.New("config: per_card_tokens must be positive")
+	}
+	if c.DailyTokens <= 0 {
+		return errors.New("config: daily_tokens must be positive")
 	}
 	return nil
 }
