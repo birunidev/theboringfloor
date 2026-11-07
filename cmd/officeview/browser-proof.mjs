@@ -146,7 +146,7 @@ try {
         );
         assert.equal(
           await page.locator("#station-checks .badge").textContent(),
-          "? Checks · Unknown",
+          "? Sandboxed checks · Unknown",
         );
         assert.equal(await page.locator("#worker .carried").count(), 0); // atlas carries symbols, never duplicate worker DOM
         assert.equal(
@@ -215,29 +215,15 @@ try {
     ["idle", { status: { ...base(), state: "idle" } }, "Idle"],
     ["implement-round-2", {}, "Implementing"],
     [
-      "review-acceptance",
-      { status: { ...base(), stage: "review:acceptance-criteria", round: 1 } },
-      "Review · Acceptance criteria",
-    ],
-    [
-      "review-tests",
-      { status: { ...base(), stage: "review:tests-lint-build", round: 1 } },
-      "Review · Tests/lint/build",
-    ],
-    [
-      "review-diff",
-      { status: { ...base(), stage: "review:diff-scope", round: 1 } },
-      "Review · Diff scope",
-    ],
-    [
-      "unknown-verdict",
+      "legacy-review-stage",
       {
+        status: { ...base(), stage: "review:acceptance-criteria", round: 1 },
         events: [
           { kind: "stage-done", stage: "review:acceptance-criteria" },
           { kind: "verdict", data: { result: "pass" } },
         ],
       },
-      "Implementing",
+      "Stage unavailable",
     ],
     [
       "ready-for-review",
@@ -359,12 +345,10 @@ try {
           await page
             .getByText("Execution still reported running", { exact: true })
             .waitFor();
-        if (name === "unknown-verdict")
-          assert(
-            (
-              await page.locator("#station-acceptance .badge").textContent()
-            ).includes("Verdict unknown"),
-          );
+        if (name === "legacy-review-stage") {
+          assert.equal(await page.locator(".reviewer-character").count(), 0);
+          assert((await page.locator("#station-scope .badge").textContent()).includes("Scope gate · Unknown"));
+        }
         if (name === "round-mismatch")
           assert.equal(
             await page.locator("#round").textContent(),

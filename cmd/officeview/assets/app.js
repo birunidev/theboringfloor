@@ -94,7 +94,7 @@ function atlas() {
     "preflight",
     "implement",
     "checks",
-    "review",
+    "gate",
     "publish",
     "shelf-empty",
     "shelf-full",
@@ -137,10 +137,10 @@ function atlas() {
       rect(s, 10, 7, 44, 12);
       for (const x of [17, 28, 39]) rect(s, x, 10, 6, 6, 0);
     }
-    if (kind === "review") {
+    if (kind === "gate") {
       rect(s, 20, 2, 24, 17);
-      rect(s, 27, 0, 10, 4);
-      path(s, "M25 8 H39 M25 12 H39 M25 16 H39", "line");
+      path(s, "M25 7 H39 M25 11 H39 M25 15 H34", "line");
+      path(s, "M36 14 L39 17 L45 9");
     }
     if (kind === "publish") {
       rect(s, 20, 4, 24, 14);
@@ -148,7 +148,7 @@ function atlas() {
       path(s, "M32 12 V0 M27 5 L32 0 L37 5");
     }
   }
-  for (const character of ["worker", "reviewer1", "reviewer2", "reviewer3"])
+  for (const character of ["worker"])
     for (const [state, frames] of Object.entries({
       idle: 1,
       walk: 4,
@@ -161,14 +161,9 @@ function atlas() {
         const s = shape(defs, "symbol", {
           id: `${character}-${state}-${frame}`,
           viewBox: "0 0 40 48",
-          class: character === "worker" ? "worker-symbol" : "reviewer-symbol",
+          class: "worker-symbol",
         });
-        const reviewer = character !== "worker";
-        const g = shape(
-          s,
-          "g",
-          reviewer ? { transform: "translate(4 8) scale(.8)" } : {},
-        );
+        const g = shape(s, "g");
         shape(g, "circle", { cx: 20, cy: 9, r: 7 });
         rect(g, 11, 18, 18, 16, 5, "body");
         let left = [6, 31],
@@ -181,17 +176,11 @@ function atlas() {
         if (state === "think") right = [26 + frame, 14];
         if (state === "success") right = [34, 27 + frame * 4];
         path(g, `M12 22 L${left.join(" ")} M28 22 L${right.join(" ")}`, "limb");
-        if (reviewer) {
-          path(g, "M16 34 L12 39 H6 M24 34 L28 39 H34 M6 41 H34", "limb");
-          rect(g, 15, 28, 15, 11);
-          path(g, "M18 32 H27 M18 35 H27", "paper-line");
-        } else {
-          const step = state === "walk" ? [-4, 0, 4, 0][frame] : 0;
-          path(g, `M16 34 L${14 + step} 46 M24 34 L${26 - step} 46`, "limb");
-          const card = shape(g, "g", { class: "carried" });
-          rect(card, 25, 22, 12, 15);
-          path(card, "M28 27 H34 M28 31 H34", "paper-line");
-        }
+        const step = state === "walk" ? [-4, 0, 4, 0][frame] : 0;
+        path(g, `M16 34 L${14 + step} 46 M24 34 L${26 - step} 46`, "limb");
+        const card = shape(g, "g", { class: "carried" });
+        rect(card, 25, 22, 12, 15);
+        path(card, "M28 27 H34 M28 31 H34", "paper-line");
       }
 }
 atlas();
@@ -201,15 +190,13 @@ const stationDefs = [
   ["setup", "Setup", "setup", 560, 112],
   ["preflight", "Pre-flight", "preflight", 784, 112],
   ["implement", "Implement", "implement", 1120, 112],
-  ["checks", "Checks", "checks", 1120, 232],
-  ["acceptance", "Acceptance criteria", "review", 224, 352],
-  ["tests", "Tests/lint/build", "review", 672, 352],
-  ["diff", "Diff scope", "review", 1120, 352],
+  ["checks", "Sandboxed checks", "checks", 1120, 232],
+  ["scope", "Scope gate", "gate", 224, 352],
+  ["sensitive", "Sensitive/CI gate", "gate", 672, 352],
+  ["diff", "Diff evidence gate", "gate", 1120, 352],
   ["publish", "Publish", "publish", 672, 472],
 ];
-const stations = new Map(),
-  reviewerContainer = el("div", null, "reviewers");
-let reviewerIndex = 0;
+const stations = new Map();
 for (const [id, name, prop, x, y] of stationDefs) {
   const section = el("section", null, `station ${id}`);
   section.id = `station-${id}`;
@@ -231,44 +218,19 @@ for (const [id, name, prop, x, y] of stationDefs) {
     badge.textContent = "Queue unavailable";
     badge.className = "meta";
   }
-  if (prop === "review") {
-    reviewerIndex++;
-    item.reviewer = reviewerIndex;
-    section.classList.add("reviewer");
-    section.append(el("span", String(reviewerIndex), "role"));
-    const holder = el("div", null, "reviewer-character");
-    holder.append(
-      graphic(
-        `reviewer${reviewerIndex}-idle-0`,
-        "character reviewer-pose",
-        40,
-        48,
-      ),
-    );
-    section.append(holder);
-    item.pose = holder;
-    reviewerContainer.append(section);
-  } else $("stations").insertBefore(section, $("worker"));
+  $("stations").insertBefore(section, $("worker"));
   stations.set(id, item);
 }
-$("stations").insertBefore(reviewerContainer, stations.get("publish").section);
 // The DOM follows process order independently of desktop grid placement.
 const stageMap = {
   claim: ["claim", "Claiming card", "work"],
   setup: ["setup", "Setting up", "work"],
   preflight: ["preflight", "Pre-flight", "think"],
-  "review:acceptance-criteria": [
-    "acceptance",
-    "Review · Acceptance criteria",
-    "think",
-  ],
-  "review:tests-lint-build": ["tests", "Review · Tests/lint/build", "think"],
-  "review:diff-scope": ["diff", "Review · Diff scope", "think"],
   publish: ["publish", "Publishing draft PR", "work"],
 };
-// Who handles each desk. The engine assigns these roles by stage:
-// pre-flight, implementer and reviewers are separate opencode sessions;
-// claim, setup, checks and publish are engine code with no model.
+// Who handles each desk. External review is deliberately outside this office.
+// Only pre-flight and implementation create model sessions; all guardrails are
+// deterministic engine work and stay Unknown without structured telemetry.
 const roleOf = {
   queue: "Queue",
   claim: "Autopilot engine",
@@ -276,12 +238,12 @@ const roleOf = {
   preflight: "Pre-flight agent",
   implement: "Implementer",
   checks: "Autopilot engine",
-  acceptance: "Reviewer 1",
-  tests: "Reviewer 2",
-  diff: "Reviewer 3",
+  scope: "Autopilot engine",
+  sensitive: "Autopilot engine",
+  diff: "Autopilot engine",
   publish: "Autopilot engine",
 };
-const modelRole = new Set(["preflight", "implement", "acceptance", "tests", "diff"]);
+const modelRole = new Set(["preflight", "implement"]);
 // Steps that write no run-log events today (status.json only, or nothing).
 const telemetryGap = {
   queue:
@@ -291,7 +253,13 @@ const telemetryGap = {
   setup:
     "This step is reported only in status.json while it runs; the run log has no stage event for it, so session, times and activity are unavailable.",
   checks:
-    "Checks · Unknown: the autopilot runs checks in a sandbox but logs no checks event (no stage, result or exit code), so nothing here can be shown as passed or failed.",
+    "Sandboxed checks · Unknown: the autopilot runs checks in a sandbox but logs no checks event (no stage, result or exit code), so nothing here can be shown as passed or failed.",
+  scope:
+    "Scope gate · Unknown: scope and empty-diff results are not emitted as structured run-log fields, so this desk cannot claim pass or fail.",
+  sensitive:
+    "Sensitive/CI gate · Unknown: sensitive-file and CI-file guardrail results are not emitted as structured run-log fields.",
+  diff:
+    "Diff evidence gate · Unknown: git diff --check and complete-diff results are included in the evidence packet but are not emitted as structured live telemetry.",
   publish:
     "This step is reported only in status.json while it runs; the run log has no stage event for it, so its PR result appears only in the final outcome.",
 };
@@ -356,7 +324,6 @@ const lastRows = () =>
           row.native.card === snapshot.lastRun.card,
       )
     : [];
-let workingSet = new Set();
 const shelves = new Map();
 for (const [kind, name, tone] of [
   ["ready-for-review", "Review", "success"],
@@ -472,21 +439,6 @@ function pose(state = "idle", frame = 0) {
   workerGraphic
     .querySelector("use")
     .setAttribute("href", `#worker-${state}-${frame}`);
-  for (const item of stations.values())
-    if (item.reviewer) {
-      const reviewerState =
-        item.id === active && ["think", "success", "fail"].includes(state)
-          ? state
-          : workingSet.has(item.id)
-            ? "think"
-            : "idle";
-      item.pose
-        .querySelector("use")
-        .setAttribute(
-          "href",
-          `#reviewer${item.reviewer}-${reviewerState}-${reviewerState === "idle" || item.id !== active ? 0 : frame}`,
-        );
-    }
 }
 function cancelMotion() {
   if (motion) {
@@ -560,7 +512,7 @@ function anchor(id) {
     };
   return {
     left: (box.right - parent.left) / scale - 28,
-    top: (box.top - parent.top) / scale + (station.reviewer ? 76 : 84),
+    top: (box.top - parent.top) / scale + 84,
   };
 }
 function placeWorker() {
@@ -606,13 +558,6 @@ function moveWorker(from, to, kind, animate) {
       route.push(
         point(aisleX, source.top),
         point(aisleX, target.top),
-        point(target.left, target.top),
-      );
-    } else if (from === "checks" && to === "acceptance") {
-      route.push(
-        point(source.left, 240),
-        point(0, 240),
-        point(0, target.top),
         point(target.left, target.top),
       );
     } else {
@@ -842,20 +787,15 @@ function renderState(s, fromNetwork = true) {
     null,
     2,
   );
-  // Desks open in the current run log (stage event, no stage-done yet).
-  // Reviewers run as parallel sessions; several may be open at once, and
-  // they are shown together only when the log proves it.
+  // Only explicit status stages can be active. Guardrails have no structured
+  // live stage telemetry, so they remain Unknown instead of simulating work.
   const running = st?.state === "running" && !connection;
   const curFacts = running ? deskFacts(currentRows()) : new Map();
-  workingSet = new Set(
-    [...curFacts]
-      .filter(([id, f]) => stations.get(id)?.reviewer && f.started && !f.doneSeen)
-      .map(([id]) => id),
-  );
   for (const [id, item] of stations) {
     if (id === "queue") continue;
-    const isWorking = id === active || workingSet.has(id);
-    item.section.classList.toggle("active", running && isWorking);
+    const isWorking = id === active;
+    const finishedStage = isWorking && curFacts.get(id)?.doneSeen;
+    item.section.classList.toggle("active", running && isWorking && !finishedStage);
     const result = done.get(id);
     const completedCurrent =
       result &&
@@ -863,21 +803,18 @@ function renderState(s, fromNetwork = true) {
       (!Number.isFinite(Date.parse(result.ts)) ||
         !Number.isFinite(Date.parse(st?.updatedAt)) ||
         Date.parse(result.ts) >= Date.parse(st.updatedAt));
-    const proven = workingSet.has(id);
     if (isWorking && stopped)
-      setBadge(item, `Last reported: ${proven ? curFacts.get(id).stage : st.stage}`);
-    else if (proven) setBadge(item, "Working", "working");
-    else if (id === active && !completedCurrent)
-      setBadge(item, "Working", "working");
+      setBadge(item, `Last reported: ${st.stage}`);
+    else if (result && (completedCurrent || finishedStage))
+      setBadge(item, result.text, result.tone);
+    else if (id === active) setBadge(item, "Working", "working");
     else if (result) setBadge(item, result.text, result.tone);
     else
       setBadge(
         item,
-        id === "checks"
-          ? "Checks · Unknown"
-          : item.reviewer
-            ? "Unknown · Verdict unknown"
-            : "Unknown",
+        ["checks", "scope", "sensitive", "diff"].includes(id)
+          ? `${item.section.getAttribute("aria-label")} · Unknown`
+          : "Unknown",
       );
   }
   for (const [id, item] of stations) {
@@ -912,11 +849,9 @@ function renderState(s, fromNetwork = true) {
   // At an outcome shelf the strip states the result; no stale role label.
   const atShelf = active.startsWith("outcome:");
   tag.hidden = !(running && hasCard && info) || atShelf;
-  // The walking worker carries the card. At review desks the reviewers are
-  // the seated characters, so the carrier is labeled "Under review".
   tag.textContent =
     running && hasCard && info
-      ? `${stations.get(info[0])?.reviewer ? "Under review" : roleOf[info[0]]} · ${st.card}`
+      ? `${curFacts.get(info[0])?.doneSeen ? "Last reported" : roleOf[info[0]]} · ${st.card}`
       : "";
   const outcomesKnown = Array.isArray(s.todayOutcomes);
   for (const shelf of shelves.values())
@@ -951,8 +886,8 @@ function renderState(s, fromNetwork = true) {
     "preflight",
     "implement",
     "checks",
-    "acceptance",
-    "tests",
+    "scope",
+    "sensitive",
     "diff",
     "publish",
   ];
@@ -1018,7 +953,7 @@ function enrich(row) {
     const target = stageInfo({ stage: n.stage })?.[0];
     if (target)
       done.set(target, {
-        text: stations.get(target).reviewer ? "Done · Verdict unknown" : "Done",
+        text: "Done",
         tone: "",
         stage: n.stage,
         ts: n.ts,
@@ -1114,10 +1049,8 @@ function officeState(s, st, info, curFacts, connection, stopped, sameRunTerminal
     if (!freshness.ok)
       return ["–", `${freshness.text} · last reported ${st.stage || "stage unavailable"}`, "warning"];
     if (!info) return ["?", "Running · Stage unavailable", ""];
-    if (workingSet.size > 1)
-      return ["●", `Working · ${workingSet.size} reviewers in parallel (proven by run log)`, "working"];
     const f = curFacts.get(info[0]);
-    if (f && f.doneSeen && workingSet.size === 0)
+    if (f && f.doneSeen)
       return ["–", `Between reported stages · ${st.stage} finished, next step not logged`, ""];
     return ["●", `Working · ${info[1]} · ${roleOf[info[0]]}`, "working"];
   }
@@ -1141,7 +1074,7 @@ function addOutcome(o) {
   if (!shelf || typeof o.card !== "string" || typeof o.run !== "string") return;
   const key = `${o.run}:${o.card}`;
   if (shelf.items.has(key)) return;
-  const rounds = validNumber(o.rounds) ? ` · ${o.rounds} review round${o.rounds === 1 ? "" : "s"}` : "";
+  const rounds = validNumber(o.rounds) ? ` · ${o.rounds} coding round${o.rounds === 1 ? "" : "s"}` : "";
   shelf.items.set(key, {
     key,
     card: o.card,
@@ -1203,12 +1136,6 @@ function openInspector(id, trigger) {
     );
     dlRow(dl, "Actions", `${f.allowed} allowed · ${f.rejected} rejected`);
   }
-  if (item.reviewer)
-    dlRow(
-      dl,
-      "Verdict",
-      "Unknown · reviewer verdicts are not logged as structured fields yet",
-    );
   body.append(dl);
   if (telemetryGap[id]) body.append(el("p", telemetryGap[id], "meta"));
   if (f && f.perms.length) {

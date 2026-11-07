@@ -1,7 +1,7 @@
 // office-proof.mjs — real-browser proof for the office improvements.
 //
 // Builds TEST DATA autopilot homes (idle with history, active implement,
-// parallel reviewers, blocked, stopped), runs the real officeview binary on
+// between-stage guardrails, blocked, stopped), runs the real officeview binary on
 // each with --test-data, asserts truthfulness in the DOM, checks that every
 // request stays on loopback, and captures screenshots.
 //
@@ -41,7 +41,7 @@ const fixtures = {
     put(home, "usage.json", { day: iso().slice(0, 10), today: 2320000, cards: {} });
     runLog(home, "BII-TEST-READY", "r-ready", [
       { kind: "start", ts: iso(-3600), msg: "claimed (TEST DATA)" },
-      { kind: "end", ts: iso(-3500), msg: "passed", data: { kind: "ready-for-review", summary: "passed all gates and 3 reviewers in round 1", pr: "https://github.com/birunidev/birunidev-space/pull/3", rounds: 1 } },
+      { kind: "end", ts: iso(-3500), msg: "passed", data: { kind: "ready-for-review", summary: "passed sandboxed checks and gates in round 1; awaiting external review", pr: "https://github.com/birunidev/birunidev-space/pull/3", rounds: 1 } },
     ], 3500);
     runLog(home, "BII-TEST-CLARIFY", "r-clarify", [
       { kind: "start", ts: iso(-1800), msg: "claimed (TEST DATA)" },
@@ -79,25 +79,27 @@ const fixtures = {
       workerTag: "Implementer · BII-TEST-ACTIVE",
       implementFacts: "✓ 3 · × 1",
       preflightFacts: "✓ 1 · × 0 · 18.82K tokens",
-      checksBadge: "Checks · Unknown",
+      checksBadge: "Sandboxed checks · Unknown",
       inspect: { station: "implement", texts: ["session ses_TEST_implement", "× Rejected: shell", "3 allowed · 1 rejected", "Unavailable · reported when the stage finishes"] },
       activeStations: 1,
     };
   },
-  parallel(home) {
-    put(home, "usage.json", { day: iso().slice(0, 10), today: 1700000, cards: { "BII-TEST-REVIEW": 90000 } });
-    const log = runLog(home, "BII-TEST-REVIEW", "r-review", [
+  guardrails(home) {
+    put(home, "usage.json", { day: iso().slice(0, 10), today: 1700000, cards: { "BII-TEST-GATES": 90000 } });
+    const log = runLog(home, "BII-TEST-GATES", "r-gates", [
       { kind: "start", ts: iso(-90), msg: "claimed (TEST DATA)" },
       { kind: "stage", stage: "implement:1", ts: iso(-80), msg: "session ses_TEST_implement" },
       { kind: "stage-done", stage: "implement:1", ts: iso(-20), msg: "Created tests", data: { billable: 52000 } },
-      { kind: "stage", stage: "review:diff-scope", ts: iso(-10), msg: "session ses_TEST_r3" },
-      { kind: "stage", stage: "review:acceptance-criteria", ts: iso(-10), msg: "session ses_TEST_r1" },
-      { kind: "stage", stage: "review:tests-lint-build", ts: iso(-10), msg: "session ses_TEST_r2" },
-      perm("review:acceptance-criteria", "read", true, "read inside worktree", iso(-8)),
-      { kind: "stage-done", stage: "review:acceptance-criteria", ts: iso(-5), msg: '{"verdict": "pass"}', data: { billable: 9000 } },
     ]);
-    put(home, "status.json", { state: "running", run: "r-review", card: "BII-TEST-REVIEW", title: "TEST DATA · Parallel review", stage: "review:tests-lint-build", round: 1, updatedAt: iso(-2), logPath: log });
-    return { strip: "Working · 2 reviewers in parallel (proven by run log)", activeReviewers: 2, checksBadge: "Checks · Unknown", workerTag: "Under review · BII-TEST-REVIEW" };
+    put(home, "status.json", { state: "running", run: "r-gates", card: "BII-TEST-GATES", title: "TEST DATA · Deterministic guardrails", stage: "implement:1", round: 1, updatedAt: iso(-2), logPath: log });
+    return {
+      strip: "Between reported stages · implement:1 finished, next step not logged",
+      checksBadge: "Sandboxed checks · Unknown",
+      gateBadges: ["Scope gate · Unknown", "Sensitive/CI gate · Unknown", "Diff evidence gate · Unknown"],
+      workerTag: "Last reported · BII-TEST-GATES",
+      activeStations: 0,
+      noReviewerCharacters: true,
+    };
   },
   blocked(home) {
     put(home, "usage.json", { day: iso().slice(0, 10), today: 1900000, cards: { "BII-TEST-BLOCKED": 300000 } });
@@ -105,7 +107,7 @@ const fixtures = {
       { kind: "start", ts: iso(-120), msg: "claimed (TEST DATA)" },
       { kind: "stage", stage: "implement:3", ts: iso(-60), msg: "session ses_TEST_implement" },
       { kind: "stage-done", stage: "implement:3", ts: iso(-30), msg: "Tried again", data: { billable: 40000 } },
-      { kind: "end", ts: iso(-3), msg: "still failing after 3 review rounds", data: { kind: "blocked", summary: "still failing after 3 review rounds", rounds: 3 } },
+      { kind: "end", ts: iso(-3), msg: "still failing after 3 coding rounds", data: { kind: "blocked", summary: "still failing checks or gates after 3 rounds", rounds: 3 } },
     ]);
     put(home, "status.json", { state: "running", run: "r-blocked", card: "BII-TEST-BLOCKED", title: "TEST DATA · Blocked card", stage: "implement:3", round: 3, updatedAt: iso(-10), logPath: log });
     return { strip: "On hold · BII-TEST-BLOCKED", onHoldShelfCard: "BII-TEST-BLOCKED", workerTagHidden: true };
@@ -181,7 +183,16 @@ for (const [name, build] of Object.entries(fixtures)) {
         if (expect.checksBadge) check(`${tag}: checks stay unknown`, (await page.textContent("#station-checks .badge")).includes(expect.checksBadge));
         if (expect.preflightBadge) check(`${tag}: stopped desk last reported`, (await page.textContent("#station-preflight .badge")).includes(expect.preflightBadge));
         if (expect.activeStations !== undefined) check(`${tag}: active desks`, (await page.locator(".station.active").count()) === expect.activeStations);
-        if (expect.activeReviewers) check(`${tag}: reviewers active from log`, (await page.locator(".station.reviewer.active").count()) === expect.activeReviewers);
+        if (expect.gateBadges) {
+          const gateText = await page.locator("#station-scope .badge, #station-sensitive .badge, #station-diff .badge").allTextContents();
+          check(
+            `${tag}: deterministic gates stay unknown without telemetry`,
+            expect.gateBadges.every((want, index) => gateText[index]?.includes(want)),
+            gateText.join(" | "),
+          );
+        }
+        if (expect.noReviewerCharacters)
+          check(`${tag}: no internal reviewer characters`, (await page.locator(".reviewer-character, .reviewer-pose").count()) === 0);
         const overflow = await page.evaluate(() => document.documentElement.scrollWidth - innerWidth);
         check(`${tag}: no horizontal overflow`, overflow <= 0, `${overflow}px`);
         const file = `${OUT}/office-${name}-${width}-${theme}${reduced ? "-reduced" : ""}.png`;
