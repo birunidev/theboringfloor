@@ -65,6 +65,7 @@ const fixtures = {
     put(home, "status.json", { state: "idle", updatedAt: iso(-5), note: "last: BII-TEST-CLARIFY needs-clarification (TEST DATA)" });
     return {
       strip: "Idle · last run BII-TEST-CLARIFY: Questions asked",
+      stripContext: "Missing approval for clean-room frontend imports",
       activity: "Last run · BII-TEST-CLARIFY",
       shelvesSubtitle: "Today, from run logs",
       reviewShelfCard: "BII-TEST-READY",
@@ -268,6 +269,10 @@ for (const [name, build] of Object.entries(fixtures)) {
         const tag = `${name} ${width} ${theme}${reduced ? " reduced" : ""}`;
         const strip = await page.textContent("#office-state");
         check(`${tag}: strip`, strip.includes(expect.strip), strip.trim());
+        if (expect.stripContext) {
+          check(`${tag}: status headline includes clarification reason`, strip.includes(expect.stripContext), strip.trim());
+          check(`${tag}: activity explains Questions asked`, (await page.textContent("#events")).includes(`Questions asked · ${expect.stripContext}`));
+        }
         check(`${tag}: TEST DATA label visible`, await page.isVisible("#test-label"));
         if (expect.activity) check(`${tag}: last-run activity`, (await page.textContent("#activity-status")).includes(expect.activity));
         if (expect.shelvesSubtitle) check(`${tag}: shelves subtitle`, (await page.textContent("#shelves")).includes(expect.shelvesSubtitle));
