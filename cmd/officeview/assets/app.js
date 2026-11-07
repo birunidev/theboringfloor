@@ -1228,7 +1228,7 @@ function eventMessage(n) {
       return n.data?.kind === "ready-for-review"
         ? ["✓", "Draft PR ready", "event-success"]
         : n.data?.kind === "needs-clarification"
-          ? ["?", "Questions asked", ""]
+          ? ["?", `Questions asked${clarificationHeadline(n.data?.clarification) ? ` · ${clarificationHeadline(n.data?.clarification)}` : ""}`, ""]
           : n.data?.kind === "blocked"
             ? ["Ⅱ", "Blocked", ""]
             : ["?", "Unrecognized event", ""];
@@ -1281,8 +1281,12 @@ function officeState(s, st, info, curFacts, connection, stopped, sameRunTerminal
       "needs-clarification": ["Questions asked", "warning"],
       blocked: ["On hold", "warning"],
     }[kind];
-    if (label && snapshot?.lastRun)
-      return ["–", `Idle · last run ${snapshot.lastRun.card}: ${label[0]}`, label[1]];
+    if (label && snapshot?.lastRun) {
+      const detail = kind === "needs-clarification"
+        ? clarificationHeadline(lastEnd?.native.data?.clarification)
+        : "";
+      return ["–", `Idle · last run ${snapshot.lastRun.card}: ${label[0]}${detail ? ` · ${detail}` : ""}`, label[1]];
+    }
     return ["–", "Idle", ""];
   }
   return ["?", st ? "Status unavailable" : "Waiting for status", "warning"];
@@ -1305,6 +1309,11 @@ function clarificationContext(raw) {
   return summary || policyBlock || questions.length
     ? { summary, policyBlock, questions }
     : null;
+}
+
+function clarificationHeadline(raw) {
+  const context = clarificationContext(raw);
+  return (context?.summary || context?.policyBlock || context?.questions[0] || "").slice(0, 110);
 }
 
 function showClarificationContext(node, raw, card, run) {
