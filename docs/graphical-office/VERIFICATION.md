@@ -147,3 +147,42 @@ VISUAL_SPEC.md matches the supplied attachment.
   with a screen reader or physical phone is claimed.
 - The graphical PR is independent of the earlier cockpit draft PR. No TUI
   change is included here, and nothing was merged or deployed.
+
+## Task launcher follow-up
+
+Added root `Taskfile.yml`, `scripts/run-autopilot-office.sh`, its isolated stub
+test, README commands and the `.task/` ignore rule. `task all` builds the UI and
+worker, preserves the existing cockpit binary if its source is on the other
+draft branch, then runs the cockpit in the foreground with UI/worker logs in a
+private temporary directory. Exiting the cockpit terminates only this launcher's
+background processes. No command automatically clears STOP.
+
+Verification:
+
+```sh
+task --list
+task --dry all
+task --dry once BOARD='Lab Engineering'
+bash -n scripts/run-autopilot-office.sh
+task build
+task status
+bwrap --die-with-parent --unshare-net --ro-bind / / --dev /dev --tmpfs /tmp -- \
+  /usr/bin/bash /home/birunidev/Documents/projects/theboringfloor/scripts/test-autopilot-office.sh \
+  /home/birunidev/Documents/projects/theboringfloor/scripts/run-autopilot-office.sh
+git diff --check
+```
+
+Real output excerpts:
+
+```text
+Preserving the existing TUI binary: cockpit source is on codex/autopilot-cockpit.
+state=idle card= stage= tokens=0 stopped=false updated=2026-11-07T00:15:18Z last: BII-812 ready-for-review
+PASS: board/project quoting, cockpit exit code, UI/worker cleanup, STOP preserved; no live worker used
+```
+
+Task listed all commands and both dry runs compiled successfully. Builds exited
+0; syntax/diff checks exited 0 without output. The first stub test invocation
+lacked bubblewrap's private `/dev` mount and failed to access `/dev/null`; the
+corrected sandbox command above passed. No live board worker was started during
+this verification. To run actual work, the founder invokes `task all`,
+`task worker` or `task once` explicitly.

@@ -1,0 +1,106 @@
+version: '3'
+
+vars:
+  BOARD: '{{default "V2 Engineering" .BOARD}}'
+  PROJECT: '{{default .ROOT_DIR .PROJECT}}'
+  UI_BIND: '{{default "127.0.0.1:8080" .UI_BIND}}'
+  REASON: '{{default "manual pause" .REASON}}'
+
+env:
+  TASK_OFFICE_ROOT: '{{.ROOT_DIR}}'
+  TASK_OFFICE_BOARD: '{{.BOARD}}'
+  TASK_OFFICE_PROJECT: '{{.PROJECT}}'
+  TASK_OFFICE_BIND: '{{.UI_BIND}}'
+  TASK_OFFICE_REASON: '{{.REASON}}'
+
+tasks:
+  default:
+    desc: List available commands
+    cmds:
+      - task --list
+
+  build:
+    desc: Build worker and UI; preserve the cockpit binary when its source is on the other draft branch
+    deps: [build:worker, build:ui, build:cockpit]
+
+  build:worker:
+    internal: true
+    cmds:
+      - go build -o bin/autopilot ./cmd/autopilot
+
+  build:ui:
+    internal: true
+    preconditions:
+      - sh: test -f cmd/officeview/main.go
+        msg: 'Graphical UI source is required; use the codex/graphical-office branch.'
+    cmds:
+      - go build -o bin/officeview ./cmd/officeview
+
+  build:cockpit:
+    internal: true
+    cmds:
+      - |
+        if [ -f internal/panels/autopilot.go ]; then
+          go build -o bin/theboringfloor ./cmd/theboringfloor
+        elif [ -x bin/theboringfloor ]; then
+          echo 'Preserving the existing TUI binary: cockpit source is on codex/autopilot-cockpit.'
+        else
+          echo 'Build bin/theboringfloor from codex/autopilot-cockpit first.' >&2
+          exit 1
+        fi
+
+  all:
+    desc: Start UI + live board worker in background, cockpit in foreground; exit cleans up background processes
+    interactive: true
+    deps: [build]
+    preconditions:
+      - sh: command -v tbo-v1 >/dev/null
+        msg: 'tbo-v1 must be installed for the opencode v1 cockpit.'
+    cmds:
+      - bash scripts/run-autopilot-office.sh
+
+  cockpit:
+    desc: Open the v1 TUI; use /autopilot or digit 9 outside chat
+    deps: [build:cockpit]
+    interactive: true
+    cmds:
+      - 'tbo-v1 --project "$TASK_OFFICE_PROJECT"'
+
+  ui:
+    desc: Start the graphical UI with confirmed STOP controls
+    deps: [build:ui]
+    cmds:
+      - 'bin/officeview --bind "$TASK_OFFICE_BIND" --controls'
+
+  ui:readonly:
+    desc: Start the graphical UI without STOP controls
+    deps: [build:ui]
+    cmds:
+      - 'bin/officeview --bind "$TASK_OFFICE_BIND"'
+
+  worker:
+    desc: Work the selected board's Autopilot Queue continuously in the foreground
+    deps: [build:worker]
+    cmds:
+      - 'bin/autopilot --live --board "$TASK_OFFICE_BOARD"'
+
+  once:
+    desc: Work at most one queued card on the selected board
+    deps: [build:worker]
+    cmds:
+      - 'bin/autopilot --live --once --board "$TASK_OFFICE_BOARD"'
+
+  status:
+    desc: Show current worker state and STOP status
+    cmds:
+      - bin/autopilot status
+
+  stop:
+    desc: Set STOP without starting or stopping a worker process
+    cmds:
+      - 'bin/autopilot stop "$TASK_OFFICE_REASON"'
+
+  resume:
+    desc: Clear STOP; does not start a worker
+    cmds:
+      - bin/autopilot resume
