@@ -48,14 +48,33 @@ const fixtures = {
       { kind: "stage", stage: "preflight", ts: iso(-1790), msg: "session ses_TEST_preflight" },
       perm("preflight", "read", true, "read inside worktree", iso(-1785)),
       { kind: "stage-done", stage: "preflight", ts: iso(-1700), msg: '{"ready": false}', data: { billable: 37206 } },
-      { kind: "end", ts: iso(-1690), msg: "not ready", data: { kind: "needs-clarification", summary: "card is not ready to implement; no code was changed", rounds: 0 } },
+      { kind: "end", ts: iso(-1690), msg: "not ready", data: {
+        kind: "needs-clarification",
+        summary: "card is not ready to implement; no code was changed",
+        rounds: 0,
+        clarification: {
+          summary: "Missing approval for clean-room frontend imports",
+          policyBlock: "BII-638 source allowlist still needs per-file review",
+          questions: ["May app.css be written from scratch?", "Who owns main.tsx? <script>TEST DATA</script>"],
+        },
+      } },
     ], 1690);
+    runLog(home, "BII-TEST-LEGACY", "r-legacy", [
+      { kind: "end", ts: iso(-2400), msg: "not ready", data: { kind: "needs-clarification", summary: "card is not ready to implement; no code was changed" } },
+    ], 2400);
     put(home, "status.json", { state: "idle", updatedAt: iso(-5), note: "last: BII-TEST-CLARIFY needs-clarification (TEST DATA)" });
     return {
       strip: "Idle · last run BII-TEST-CLARIFY: Questions asked",
       activity: "Last run · BII-TEST-CLARIFY",
       shelvesSubtitle: "Today, from run logs",
       reviewShelfCard: "BII-TEST-READY",
+      clarification: {
+        card: "BII-TEST-CLARIFY",
+        texts: ["Missing approval for clean-room frontend imports", "BII-638 source allowlist", "May app.css be written from scratch?", "Who owns main.tsx?", "r-clarify"],
+        questions: 2,
+        escapedHTML: "<script>TEST DATA</script>",
+      },
+      legacyClarification: "BII-TEST-LEGACY",
       workerTagHidden: true,
       activeStations: 0,
     };
@@ -253,6 +272,20 @@ for (const [name, build] of Object.entries(fixtures)) {
         if (expect.activity) check(`${tag}: last-run activity`, (await page.textContent("#activity-status")).includes(expect.activity));
         if (expect.shelvesSubtitle) check(`${tag}: shelves subtitle`, (await page.textContent("#shelves")).includes(expect.shelvesSubtitle));
         if (expect.reviewShelfCard) check(`${tag}: review shelf from today's logs`, (await page.textContent("#shelves .success-outcome")).includes(expect.reviewShelfCard));
+        if (expect.clarification) {
+          const x = expect.clarification;
+          const item = page.locator("#shelves .shelf").nth(1).locator(".card-chip", { hasText: x.card });
+          const details = item.locator(".clarification-context");
+          const actual = await details.textContent();
+          for (const part of x.texts)
+            check(`${tag}: clarification includes ${part}`, actual.includes(part), actual);
+          check(`${tag}: clarification questions numbered`, (await details.locator("li").count()) === x.questions);
+          check(`${tag}: no injected clarification HTML`, (await details.locator("script").count()) === 0 && actual.includes(x.escapedHTML));
+        }
+        if (expect.legacyClarification) {
+          const item = page.locator("#shelves .shelf").nth(1).locator(".card-chip", { hasText: expect.legacyClarification });
+          check(`${tag}: legacy clarification explicitly unavailable`, (await item.locator(".clarification-context").textContent()).includes("were not recorded for this run"));
+        }
         if (expect.onHoldShelfCard) check(`${tag}: on-hold shelf`, (await page.locator("#shelves .shelf").nth(2).textContent()).includes(expect.onHoldShelfCard));
         if (expect.workerTagHidden) check(`${tag}: no worker label when idle`, await page.isHidden("#worker-tag"));
         if (expect.workerTag) {
