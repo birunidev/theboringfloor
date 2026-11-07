@@ -333,3 +333,28 @@ Evolves spec v1 for runs with parallel lanes. It does not change v1 behavior for
 4. **Shared desk.** When two lanes report the same desk, both stay identifiable: each worker carries its lane name as visible HTML text, offset so neither hides the other. Identity is never conveyed by color alone and never relies on `title` or hover.
 5. **Accessibility.** Each lane's card, stage and round are in the text lane list, not only in SVG. Lane workers are `aria-hidden`; the lane list is the accessible equivalent.
 6. **Precedence.** Where this amendment conflicts with v1 wording about extra or concurrent workers (section 1 and section 4), this amendment wins for two or more lanes only.
+
+## Amendment B — Explain questions rather than generic outcomes (8 November 2026)
+
+Founder decision: when pre-flight moves a card to Needs Clarification, its
+outcome card must disclose the **actual pre-flight context**, not only “card is
+not ready to implement; no code was changed”.
+
+1. Show the pre-flight summary as “Why clarification is needed”; show any
+   specific quoted policy/source blocker and **numbered founder questions**.
+2. Cite the exact card key and run ID in the text, and label the material
+   “Pre-flight reported · not independently verified”. These are session
+   records, not a live Space board-list feed or an independent legal ruling.
+3. Render log fields as escaped text. Do not insert arbitrary HTML, expose
+   auth/config secrets, or display the full ChatGPT prompt. The telemetry
+   schema limits lengths and count; the client independently bounds them.
+4. If the pre-flight context was not recorded (old runs, invalid logs), show
+   “Clarification details were not recorded for this run” and direct the
+   founder to the existing card comment. Do not manufacture explanation text
+   from the generic outcome, infer missing questions or enable a retry button.
+5. Preserve visual tokens, 44px control targets, responsive 390px/1440px,
+   read-only/STOP semantics, daily token and per-card caps, and source
+   precedence from the original v1 spec and Amendment A.
+
+This amendment changes **explanation only**. It does not authorize dispatch,
+merge, deployment, closing questions, or new source access.
