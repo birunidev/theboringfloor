@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/theboringhumane/theboringfloor/internal/autopilot/runstate"
 	"github.com/theboringhumane/theboringfloor/internal/config"
 	"github.com/theboringhumane/theboringfloor/internal/panels"
 	"github.com/theboringhumane/theboringfloor/internal/state"
@@ -223,6 +224,8 @@ func (m *Model) workspaceInit() {
 	m.tickets = panels.NewTickets(dir, demo)
 	m.tabs.Replace(3, m.tickets)
 	m.tabs.Append(m.files)
+	m.autopilot = panels.NewAutopilot(runstate.DefaultRoot())
+	m.tabs.Append(m.autopilot)
 	m.tabs.SetState(m.st)
 	m.chat.SetWorkspaceContext(m.projInfo().Project, m.backendName(), m.conversationTeam)
 }

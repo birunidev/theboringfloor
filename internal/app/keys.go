@@ -4,10 +4,10 @@
 // quitArmWindow quits (q/ctrl+c stay single-press, and only outside the
 // chat textarea and a CAPTURED terminal — inside a captured terminal they
 // go to the shell; ctrl+c is a real SIGINT there). tab/shift+tab cycle
-// panels, 1..7 jump, ↑↓/pgup/pgdn/wheel scroll, enter sends chat.
+// panels, 1..9 jump, ↑↓/pgup/pgdn/wheel scroll, enter sends chat.
 //
-// THE TAB LIST is chat|terminal|agents|board|mail|activity|git — SEVEN
-// panels on the right strip, digit-jumped 1..7 (grab_test.go pins
+// THE TAB LIST is chat|terminal|agents|board|mail|activity|git|files|autopilot.
+// These nine panels are digit-jumped 1..9 (grab_test.go pins
 // TabJump's exact map and the Tab7 binding). The browser is NOT one of
 // them: it lives on the LEFT pane's two-tab floor|browser slot
 // (app/browser.go), flipped with ctrl+b — a raw handleKey claim like
@@ -109,7 +109,7 @@ func (k KeyMap) ShortHelpView() string {
 	return h.ShortHelpView(k.ShortHelp())
 }
 
-// TabJump maps a 1..7 keypress to a right-strip tab index, or -1. The
+// TabJump maps a 1..9 keypress to a right-strip tab index, or -1. The
 // browser NEVER appears here — it rides the left pane's floor|browser
 // slot (ctrl+b), not this strip (the header comment's burned-keys
 // ruling).
@@ -131,6 +131,8 @@ func (k KeyMap) TabJump(s string) int {
 		return 6
 	case "8":
 		return 7
+	case "9":
+		return 8
 	}
 	return -1
 }

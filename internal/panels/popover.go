@@ -81,6 +81,7 @@ var slashCommands = []slashCommand{
 	{"/floors", "project workspaces and conversations", ""},
 	{"/files", "project file tree and preview", ""},
 	{"/tickets", "project task board", ""},
+	{"/autopilot", "autopilot status and STOP switch", ""},
 	{"/expand", "expand the active panel", ""},
 	{"/backend", "switch backend", "/backend opencode|claudecode|codex"},
 	{"/session", "past-sessions picker (enter resumes live)", ""},
