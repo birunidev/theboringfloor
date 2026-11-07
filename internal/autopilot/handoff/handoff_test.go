@@ -62,7 +62,7 @@ func TestBlockedComment(t *testing.T) {
 }
 
 func TestClarificationAndPromptFile(t *testing.T) {
-	p := pipeline.Preflight{PolicyBlock: "Implementation remains PAUSED until BII-638", Questions: []string{"Is BII-638 done?", "Which key TTL?"},
+	p := pipeline.Preflight{Summary: "Missing owner clearance and a verified test baseline", PolicyBlock: "Implementation remains PAUSED until BII-638", Questions: []string{"Is BII-638 done?", "Which key TTL?"},
 		ChatGPTPrompt: "Help me turn BII-655 into a spec. ```inject```"}
 	dir := t.TempDir()
 	path, err := WriteChatGPTPrompt(dir, run, p)
@@ -77,7 +77,7 @@ func TestClarificationAndPromptFile(t *testing.T) {
 		t.Fatalf("prompt file:\n%s", body)
 	}
 	c := ClarificationComment(run, p, path)
-	for _, want := range []string{"NEEDS CLARIFICATION", "PAUSED until BII-638", "2. Which key TTL?", "Paste-ready ChatGPT prompt", path} {
+	for _, want := range []string{"NEEDS CLARIFICATION", "Why this needs clarification", "Missing owner clearance", "PAUSED until BII-638", "2. Which key TTL?", "Paste-ready ChatGPT prompt", path} {
 		if !strings.Contains(c, want) {
 			t.Errorf("clarification missing %q", want)
 		}
