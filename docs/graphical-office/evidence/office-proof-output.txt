@@ -134,38 +134,46 @@ PASS active 390 dark reduced: checks stay unknown
 PASS active 390 dark reduced: active desks
 PASS active 390 dark reduced: no horizontal overflow — 0px
 PASS active 390 dark reduced: no external requests
-PASS parallel 1440 light: strip — ● Working · 2 reviewers in parallel (proven by run log)
-PASS parallel 1440 light: TEST DATA label visible
-PASS parallel 1440 light: worker label text
-PASS parallel 1440 light: worker label shown only on desktop
-PASS parallel 1440 light: checks stay unknown
-PASS parallel 1440 light: reviewers active from log
-PASS parallel 1440 light: no horizontal overflow — 0px
-PASS parallel 1440 light: no external requests
-PASS parallel 1440 dark: strip — ● Working · 2 reviewers in parallel (proven by run log)
-PASS parallel 1440 dark: TEST DATA label visible
-PASS parallel 1440 dark: worker label text
-PASS parallel 1440 dark: worker label shown only on desktop
-PASS parallel 1440 dark: checks stay unknown
-PASS parallel 1440 dark: reviewers active from log
-PASS parallel 1440 dark: no horizontal overflow — 0px
-PASS parallel 1440 dark: no external requests
-PASS parallel 390 light: strip — ● Working · 2 reviewers in parallel (proven by run log)
-PASS parallel 390 light: TEST DATA label visible
-PASS parallel 390 light: worker label text
-PASS parallel 390 light: worker label shown only on desktop
-PASS parallel 390 light: checks stay unknown
-PASS parallel 390 light: reviewers active from log
-PASS parallel 390 light: no horizontal overflow — 0px
-PASS parallel 390 light: no external requests
-PASS parallel 390 dark: strip — ● Working · 2 reviewers in parallel (proven by run log)
-PASS parallel 390 dark: TEST DATA label visible
-PASS parallel 390 dark: worker label text
-PASS parallel 390 dark: worker label shown only on desktop
-PASS parallel 390 dark: checks stay unknown
-PASS parallel 390 dark: reviewers active from log
-PASS parallel 390 dark: no horizontal overflow — 0px
-PASS parallel 390 dark: no external requests
+PASS guardrails 1440 light: strip — – Between reported stages · implement:1 finished, next step not logged
+PASS guardrails 1440 light: TEST DATA label visible
+PASS guardrails 1440 light: worker label text
+PASS guardrails 1440 light: worker label shown only on desktop
+PASS guardrails 1440 light: checks stay unknown
+PASS guardrails 1440 light: active desks
+PASS guardrails 1440 light: deterministic gates stay unknown without telemetry — ? Scope gate · Unknown | ? Sensitive/CI gate · Unknown | ? Diff evidence gate · Unknown
+PASS guardrails 1440 light: no internal reviewer characters
+PASS guardrails 1440 light: no horizontal overflow — 0px
+PASS guardrails 1440 light: no external requests
+PASS guardrails 1440 dark: strip — – Between reported stages · implement:1 finished, next step not logged
+PASS guardrails 1440 dark: TEST DATA label visible
+PASS guardrails 1440 dark: worker label text
+PASS guardrails 1440 dark: worker label shown only on desktop
+PASS guardrails 1440 dark: checks stay unknown
+PASS guardrails 1440 dark: active desks
+PASS guardrails 1440 dark: deterministic gates stay unknown without telemetry — ? Scope gate · Unknown | ? Sensitive/CI gate · Unknown | ? Diff evidence gate · Unknown
+PASS guardrails 1440 dark: no internal reviewer characters
+PASS guardrails 1440 dark: no horizontal overflow — 0px
+PASS guardrails 1440 dark: no external requests
+PASS guardrails 390 light: strip — – Between reported stages · implement:1 finished, next step not logged
+PASS guardrails 390 light: TEST DATA label visible
+PASS guardrails 390 light: worker label text
+PASS guardrails 390 light: worker label shown only on desktop
+PASS guardrails 390 light: checks stay unknown
+PASS guardrails 390 light: active desks
+PASS guardrails 390 light: deterministic gates stay unknown without telemetry — ? Scope gate · Unknown | ? Sensitive/CI gate · Unknown | ? Diff evidence gate · Unknown
+PASS guardrails 390 light: no internal reviewer characters
+PASS guardrails 390 light: no horizontal overflow — 0px
+PASS guardrails 390 light: no external requests
+PASS guardrails 390 dark: strip — – Between reported stages · implement:1 finished, next step not logged
+PASS guardrails 390 dark: TEST DATA label visible
+PASS guardrails 390 dark: worker label text
+PASS guardrails 390 dark: worker label shown only on desktop
+PASS guardrails 390 dark: checks stay unknown
+PASS guardrails 390 dark: active desks
+PASS guardrails 390 dark: deterministic gates stay unknown without telemetry — ? Scope gate · Unknown | ? Sensitive/CI gate · Unknown | ? Diff evidence gate · Unknown
+PASS guardrails 390 dark: no internal reviewer characters
+PASS guardrails 390 dark: no horizontal overflow — 0px
+PASS guardrails 390 dark: no external requests
 PASS blocked 1440 light: strip — Ⅱ On hold · BII-TEST-BLOCKED
 PASS blocked 1440 light: TEST DATA label visible
 PASS blocked 1440 light: on-hold shelf
@@ -210,6 +218,208 @@ PASS stopped 390 dark: TEST DATA label visible
 PASS stopped 390 dark: stopped desk last reported
 PASS stopped 390 dark: no horizontal overflow — 0px
 PASS stopped 390 dark: no external requests
+PASS lanes 1440 light: strip — ● Working · 2 lanes in parallel (workers.json) · backend · Implementing | frontend · Pre-flight
+PASS lanes 1440 light: TEST DATA label visible
+PASS lanes 1440 light: active desks
+PASS lanes 1440 light: lane rows
+PASS lanes 1440 light: lane workers
+PASS lanes 1440 light: single worker hidden in lane mode
+PASS lanes 1440 light: HUD stage
+PASS lanes 1440 light: no lane warning
+PASS lanes 1440 light: implement desk badge — ● Working
+PASS lanes 1440 light: preflight desk badge — ● Working
+PASS lanes 1440 light: backend card usage
+PASS lanes 1440 light: frontend card usage
+PASS lanes 1440 light: card meter says per lane
+PASS lanes 1440 light: no finished-run label while lanes run
+PASS lanes 1440 light: ticker "[backend] Allowed: read"
+PASS lanes 1440 light: ticker "[backend] Rejected: shell"
+PASS lanes 1440 light: ticker "[frontend] Stage: preflight"
+PASS lanes 1440 light: lane labels shown only on desktop — 2
+PASS lanes 1440 light: lane inspector shows "Lane backend · BII-TEST-BE"
+PASS lanes 1440 light: lane inspector shows "session ses_TEST_be"
+PASS lanes 1440 light: lane inspector shows "× Rejected: shell"
+PASS lanes 1440 light: lane inspector shows "3 allowed · 1 rejected"
+PASS lanes 1440 light: lane inspector omits "Lane frontend"
+PASS lanes 1440 light: Escape returns focus to the lane button
+PASS lanes 1440 light: no horizontal overflow — 0px
+PASS lanes 1440 light: inspector shows "Lane backend · BII-TEST-BE"
+PASS lanes 1440 light: inspector shows "session ses_TEST_be"
+PASS lanes 1440 light: inspector shows "× Rejected: shell"
+PASS lanes 1440 light: Escape closes inspector and returns focus
+PASS lanes 1440 light: no external requests
+PASS lanes 1440 dark: strip — ● Working · 2 lanes in parallel (workers.json) · backend · Implementing | frontend · Pre-flight
+PASS lanes 1440 dark: TEST DATA label visible
+PASS lanes 1440 dark: active desks
+PASS lanes 1440 dark: lane rows
+PASS lanes 1440 dark: lane workers
+PASS lanes 1440 dark: single worker hidden in lane mode
+PASS lanes 1440 dark: HUD stage
+PASS lanes 1440 dark: no lane warning
+PASS lanes 1440 dark: implement desk badge — ● Working
+PASS lanes 1440 dark: preflight desk badge — ● Working
+PASS lanes 1440 dark: backend card usage
+PASS lanes 1440 dark: frontend card usage
+PASS lanes 1440 dark: card meter says per lane
+PASS lanes 1440 dark: no finished-run label while lanes run
+PASS lanes 1440 dark: ticker "[backend] Allowed: read"
+PASS lanes 1440 dark: ticker "[backend] Rejected: shell"
+PASS lanes 1440 dark: ticker "[frontend] Stage: preflight"
+PASS lanes 1440 dark: lane labels shown only on desktop — 2
+PASS lanes 1440 dark: lane inspector shows "Lane backend · BII-TEST-BE"
+PASS lanes 1440 dark: lane inspector shows "session ses_TEST_be"
+PASS lanes 1440 dark: lane inspector shows "× Rejected: shell"
+PASS lanes 1440 dark: lane inspector shows "3 allowed · 1 rejected"
+PASS lanes 1440 dark: lane inspector omits "Lane frontend"
+PASS lanes 1440 dark: Escape returns focus to the lane button
+PASS lanes 1440 dark: no horizontal overflow — 0px
+PASS lanes 1440 dark: inspector shows "Lane backend · BII-TEST-BE"
+PASS lanes 1440 dark: inspector shows "session ses_TEST_be"
+PASS lanes 1440 dark: inspector shows "× Rejected: shell"
+PASS lanes 1440 dark: Escape closes inspector and returns focus
+PASS lanes 1440 dark: no external requests
+PASS lanes 390 light: strip — ● Working · 2 lanes in parallel (workers.json) · backend · Implementing | frontend · Pre-flight
+PASS lanes 390 light: TEST DATA label visible
+PASS lanes 390 light: active desks
+PASS lanes 390 light: lane rows
+PASS lanes 390 light: lane workers
+PASS lanes 390 light: single worker hidden in lane mode
+PASS lanes 390 light: HUD stage
+PASS lanes 390 light: no lane warning
+PASS lanes 390 light: implement desk badge — ● Working · backend
+PASS lanes 390 light: preflight desk badge — ● Working · frontend
+PASS lanes 390 light: backend card usage
+PASS lanes 390 light: frontend card usage
+PASS lanes 390 light: card meter says per lane
+PASS lanes 390 light: no finished-run label while lanes run
+PASS lanes 390 light: ticker "[backend] Allowed: read"
+PASS lanes 390 light: ticker "[backend] Rejected: shell"
+PASS lanes 390 light: ticker "[frontend] Stage: preflight"
+PASS lanes 390 light: lane labels shown only on desktop — 0
+PASS lanes 390 light: lane inspector shows "Lane backend · BII-TEST-BE"
+PASS lanes 390 light: lane inspector shows "session ses_TEST_be"
+PASS lanes 390 light: lane inspector shows "× Rejected: shell"
+PASS lanes 390 light: lane inspector shows "3 allowed · 1 rejected"
+PASS lanes 390 light: lane inspector omits "Lane frontend"
+PASS lanes 390 light: Escape returns focus to the lane button
+PASS lanes 390 light: no horizontal overflow — 0px
+PASS lanes 390 light: inspector shows "Lane backend · BII-TEST-BE"
+PASS lanes 390 light: inspector shows "session ses_TEST_be"
+PASS lanes 390 light: inspector shows "× Rejected: shell"
+PASS lanes 390 light: Escape closes inspector and returns focus
+PASS lanes 390 light: no external requests
+PASS lanes 390 dark: strip — ● Working · 2 lanes in parallel (workers.json) · backend · Implementing | frontend · Pre-flight
+PASS lanes 390 dark: TEST DATA label visible
+PASS lanes 390 dark: active desks
+PASS lanes 390 dark: lane rows
+PASS lanes 390 dark: lane workers
+PASS lanes 390 dark: single worker hidden in lane mode
+PASS lanes 390 dark: HUD stage
+PASS lanes 390 dark: no lane warning
+PASS lanes 390 dark: implement desk badge — ● Working · backend
+PASS lanes 390 dark: preflight desk badge — ● Working · frontend
+PASS lanes 390 dark: backend card usage
+PASS lanes 390 dark: frontend card usage
+PASS lanes 390 dark: card meter says per lane
+PASS lanes 390 dark: no finished-run label while lanes run
+PASS lanes 390 dark: ticker "[backend] Allowed: read"
+PASS lanes 390 dark: ticker "[backend] Rejected: shell"
+PASS lanes 390 dark: ticker "[frontend] Stage: preflight"
+PASS lanes 390 dark: lane labels shown only on desktop — 0
+PASS lanes 390 dark: lane inspector shows "Lane backend · BII-TEST-BE"
+PASS lanes 390 dark: lane inspector shows "session ses_TEST_be"
+PASS lanes 390 dark: lane inspector shows "× Rejected: shell"
+PASS lanes 390 dark: lane inspector shows "3 allowed · 1 rejected"
+PASS lanes 390 dark: lane inspector omits "Lane frontend"
+PASS lanes 390 dark: Escape returns focus to the lane button
+PASS lanes 390 dark: no horizontal overflow — 0px
+PASS lanes 390 dark: inspector shows "Lane backend · BII-TEST-BE"
+PASS lanes 390 dark: inspector shows "session ses_TEST_be"
+PASS lanes 390 dark: inspector shows "× Rejected: shell"
+PASS lanes 390 dark: Escape closes inspector and returns focus
+PASS lanes 390 dark: no external requests
+PASS lanes-same-desk 1440 light: strip — ● Working · 2 lanes in parallel (workers.json) · backend · Implementing | frontend · Implementing
+PASS lanes-same-desk 1440 light: TEST DATA label visible
+PASS lanes-same-desk 1440 light: active desks
+PASS lanes-same-desk 1440 light: lane rows
+PASS lanes-same-desk 1440 light: lane workers
+PASS lanes-same-desk 1440 light: implement desk badge — ● Working · 2 lanes
+PASS lanes-same-desk 1440 light: shared-desk labels do not overlap — 1075.5, 1097.5
+PASS lanes-same-desk 1440 light: shared desk facts
+PASS lanes-same-desk 1440 light: lanes sharing a desk are spaced apart — 1132.328125, 1162.328125
+PASS lanes-same-desk 1440 light: lane labels shown only on desktop — 2
+PASS lanes-same-desk 1440 light: no horizontal overflow — 0px
+PASS lanes-same-desk 1440 light: no external requests
+PASS lanes-same-desk 1440 dark: strip — ● Working · 2 lanes in parallel (workers.json) · backend · Implementing | frontend · Implementing
+PASS lanes-same-desk 1440 dark: TEST DATA label visible
+PASS lanes-same-desk 1440 dark: active desks
+PASS lanes-same-desk 1440 dark: lane rows
+PASS lanes-same-desk 1440 dark: lane workers
+PASS lanes-same-desk 1440 dark: implement desk badge — ● Working · 2 lanes
+PASS lanes-same-desk 1440 dark: shared-desk labels do not overlap — 1075.5, 1097.5
+PASS lanes-same-desk 1440 dark: shared desk facts
+PASS lanes-same-desk 1440 dark: lanes sharing a desk are spaced apart — 1132.328125, 1162.328125
+PASS lanes-same-desk 1440 dark: lane labels shown only on desktop — 2
+PASS lanes-same-desk 1440 dark: no horizontal overflow — 0px
+PASS lanes-same-desk 1440 dark: no external requests
+PASS lanes-same-desk 390 light: strip — ● Working · 2 lanes in parallel (workers.json) · backend · Implementing | frontend · Implementing
+PASS lanes-same-desk 390 light: TEST DATA label visible
+PASS lanes-same-desk 390 light: active desks
+PASS lanes-same-desk 390 light: lane rows
+PASS lanes-same-desk 390 light: lane workers
+PASS lanes-same-desk 390 light: implement desk badge — ● Working · 2 lanes (backend, frontend)
+PASS lanes-same-desk 390 light: shared desk facts
+PASS lanes-same-desk 390 light: lanes sharing a desk are spaced apart — 311, 334
+PASS lanes-same-desk 390 light: lane labels shown only on desktop — 0
+PASS lanes-same-desk 390 light: no horizontal overflow — 0px
+PASS lanes-same-desk 390 light: no external requests
+PASS lanes-same-desk 390 dark: strip — ● Working · 2 lanes in parallel (workers.json) · backend · Implementing | frontend · Implementing
+PASS lanes-same-desk 390 dark: TEST DATA label visible
+PASS lanes-same-desk 390 dark: active desks
+PASS lanes-same-desk 390 dark: lane rows
+PASS lanes-same-desk 390 dark: lane workers
+PASS lanes-same-desk 390 dark: implement desk badge — ● Working · 2 lanes (backend, frontend)
+PASS lanes-same-desk 390 dark: shared desk facts
+PASS lanes-same-desk 390 dark: lanes sharing a desk are spaced apart — 311, 334
+PASS lanes-same-desk 390 dark: lane labels shown only on desktop — 0
+PASS lanes-same-desk 390 dark: no horizontal overflow — 0px
+PASS lanes-same-desk 390 dark: no external requests
+PASS lanes-unavailable 1440 light: strip — ? Running · Stage unavailable
+PASS lanes-unavailable 1440 light: TEST DATA label visible
+PASS lanes-unavailable 1440 light: active desks
+PASS lanes-unavailable 1440 light: lane rows
+PASS lanes-unavailable 1440 light: lane workers
+PASS lanes-unavailable 1440 light: lane warning shown
+PASS lanes-unavailable 1440 light: lane warning text — Lane details unavailable · workers.json is older than status.json (a later single-worker write); lane data ignored
+PASS lanes-unavailable 1440 light: no horizontal overflow — 0px
+PASS lanes-unavailable 1440 light: no external requests
+PASS lanes-unavailable 1440 dark: strip — ? Running · Stage unavailable
+PASS lanes-unavailable 1440 dark: TEST DATA label visible
+PASS lanes-unavailable 1440 dark: active desks
+PASS lanes-unavailable 1440 dark: lane rows
+PASS lanes-unavailable 1440 dark: lane workers
+PASS lanes-unavailable 1440 dark: lane warning shown
+PASS lanes-unavailable 1440 dark: lane warning text — Lane details unavailable · workers.json is older than status.json (a later single-worker write); lane data ignored
+PASS lanes-unavailable 1440 dark: no horizontal overflow — 0px
+PASS lanes-unavailable 1440 dark: no external requests
+PASS lanes-unavailable 390 light: strip — ? Running · Stage unavailable
+PASS lanes-unavailable 390 light: TEST DATA label visible
+PASS lanes-unavailable 390 light: active desks
+PASS lanes-unavailable 390 light: lane rows
+PASS lanes-unavailable 390 light: lane workers
+PASS lanes-unavailable 390 light: lane warning shown
+PASS lanes-unavailable 390 light: lane warning text — Lane details unavailable · workers.json is older than status.json (a later single-worker write); lane data ignored
+PASS lanes-unavailable 390 light: no horizontal overflow — 0px
+PASS lanes-unavailable 390 light: no external requests
+PASS lanes-unavailable 390 dark: strip — ? Running · Stage unavailable
+PASS lanes-unavailable 390 dark: TEST DATA label visible
+PASS lanes-unavailable 390 dark: active desks
+PASS lanes-unavailable 390 dark: lane rows
+PASS lanes-unavailable 390 dark: lane workers
+PASS lanes-unavailable 390 dark: lane warning shown
+PASS lanes-unavailable 390 dark: lane warning text — Lane details unavailable · workers.json is older than status.json (a later single-worker write); lane data ignored
+PASS lanes-unavailable 390 dark: no horizontal overflow — 0px
+PASS lanes-unavailable 390 dark: no external requests
 
-28 screenshots written to docs/graphical-office/evidence
+44 screenshots written to /tmp/claude-1000/-home-birunidev-Documents-projects/ce099121-836b-5df4-9199-9f70e75d8ec8/scratchpad/lane-shots
 ALL CHECKS PASSED

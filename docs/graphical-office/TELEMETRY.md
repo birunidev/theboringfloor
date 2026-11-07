@@ -101,3 +101,25 @@ Still Unknown until the engine instrumentation PR: checks execution and
 results, deterministic scope/sensitive/diff gate results, claim/setup/publish
 timing and sessions, failure reason (gate failure vs error vs cap), outcome card
 titles, and the queue.
+
+## Parallel lanes (`workers.json`)
+
+With two or more active lanes the engine writes `status.json` as a summary
+(`state: running`, no card/stage/log path, note "N lanes active; see
+workers.json"). Each lane's card, stage, round and log path exist only in
+`workers.json`. The office reads it as follows; nothing is inferred.
+
+| Rule | Detail |
+|---|---|
+| Absent file | No lane data, no error. "Absence means no parallel-lane run has been recorded." |
+| Parse | Rooted read, 1 MiB cap. Version must be 1, `workers` an array, at most 8 lanes, lane names unique and non-empty. Anything else is `workersError`, no lanes. |
+| Pairing | Lanes are used only when `workers.json.updatedAt` equals `status.json.updatedAt`. `Engine.persistStatusesLocked` writes both in one call with one timestamp. Older means a later single-worker write; newer means an unpaired write. Both are ignored with a stated reason, so a crash can never leave ghost lanes. |
+| State consistency | Zero lanes require `idle`; one lane must be mirrored exactly by `status.json` (state, run, card); two or more require the summary (`running`, no card). |
+| Lane logs | Each lane's `logPath` must resolve inside `runs/` (rooted; escaping paths and symlinks are refused per lane). Records are labelled with the lane, streamed over `/api/events`, and attributed to a lane only by its own log plus the run and card it reports now. |
+| Card usage | Per-lane lifetime card tokens from `usage.json` `cards`, shown against the configured per-card cap. Unknown shows "usage unavailable". |
+| Lane mode | Two or more usable lanes. One static worker per lane at its last reported desk (no walking or animation), lane list, lane-aware desk badges, per-lane inspector sections. One lane is already mirrored by `status.json`, so the single-worker view is unchanged apart from lane-labelled activity. |
+| Missing detail | `status.json` says lanes are active but detail is absent, unpaired or unreadable: a visible warning with the reason; no lanes drawn. |
+| Finished history | "Last run" history is never offered while `status.json` says running. |
+
+Still Unknown: checks, guardrail results, per-lane queue, failure reasons. They
+need the instrumentation PR.
