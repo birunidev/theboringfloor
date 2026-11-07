@@ -28,7 +28,7 @@ type AgentFactory func(ctx context.Context, dir string, card board.Card, bc Boar
 
 // Publisher commits, pushes and opens the draft PR (see package publish).
 type Publisher interface {
-	Publish(ctx context.Context, dir, branch, base, commitMsg, prTitle, prBody string) (prURL string, err error)
+	Publish(ctx context.Context, dir, branch, base, commitMsg, prTitle, prBody string) (prURL, headSHA string, err error)
 }
 
 // Engine runs cards.
@@ -350,14 +350,16 @@ func (e *Engine) RunCard(ctx context.Context, r Resolved, summary board.Card) er
 	}
 	defer cleanup()
 	run.Base = r.BC.Base
+	run.BaseSHA = wt.BaseSHA
 	out := pipeline.Run(runCtx, cardContext(c, r), agent, WTWorkspace{WT: wt}, CmdChecker{Dir: wt.Path, Checks: r.BC.Checks, Sandbox: &Sandbox{Worktree: wt.Path, ReadOnly: r.BC.SandboxReadOnly}}, pipeline.Config{MaxRounds: e.Cfg.MaxRounds})
 	if out.Kind == pipeline.ReadyForReview {
 		setStage("publish")
-		url, err := e.Pub.Publish(runCtx, wt.Path, wt.Branch, r.BC.Base, handoff.CommitMessage(run, out), handoff.PRTitle(run), handoff.PRBody(run, out))
+		url, head, err := e.Pub.Publish(runCtx, wt.Path, wt.Branch, r.BC.Base, handoff.CommitMessage(run, out), handoff.PRTitle(run), handoff.PRBody(run, out))
 		if err != nil {
 			out.Kind, out.Summary, out.Err = pipeline.Blocked, "passed review but publishing failed", err
 		} else {
 			run.PRURL = url
+			run.HeadSHA = head
 			run.GitHubRepo = githubRepoFromPR(url)
 			if d, err := worktree.Diff(runCtx, wt); err == nil {
 				run.Diff = d

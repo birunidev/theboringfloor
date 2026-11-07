@@ -13,7 +13,7 @@ import (
 //   - the whole filesystem read-only,
 //   - $HOME replaced by an empty tmpfs (no ~/.ssh, tokens, configs),
 //   - only the worktree writable, plus explicitly listed read-only paths,
-//   - a private /tmp, no network, and death with the parent.
+//   - a private /tmp, no network, a cleared environment, and death with the parent.
 type Sandbox struct {
 	Worktree string
 	ReadOnly []string // extra paths under $HOME to expose read-only (venv, deps)
@@ -62,6 +62,14 @@ func (s Sandbox) Wrap(argv []string) ([]string, error) {
 		}
 		out = append(out, "--ro-bind", abs, abs)
 	}
-	out = append(out, "--bind", wt, wt, "--chdir", wt, "--setenv", "HOME", home, "--setenv", "CI", "1", "--")
+	path := os.Getenv("PATH")
+	if path == "" {
+		path = "/usr/local/bin:/usr/bin:/bin"
+	}
+	// --clearenv: tokens or keys in the member's environment never reach
+	// agent-written code or its output.
+	out = append(out, "--bind", wt, wt, "--chdir", wt, "--clearenv",
+		"--setenv", "PATH", path, "--setenv", "HOME", home, "--setenv", "LANG", "C.UTF-8",
+		"--setenv", "TMPDIR", "/tmp", "--setenv", "CI", "1", "--")
 	return append(out, argv...), nil
 }

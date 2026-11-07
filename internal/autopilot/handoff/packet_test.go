@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+
+	"github.com/theboringhumane/theboringfloor/internal/autopilot/pipeline"
 )
 
 const smallDiff = "diff --git a/backend/tests/unit/test_x.py b/backend/tests/unit/test_x.py\nnew file mode 100644\n--- /dev/null\n+++ b/backend/tests/unit/test_x.py\n@@ -0,0 +1,3 @@\n+def test_x():\n+    assert 1 + 1 == 2\n+# ``` fence in code\n"
@@ -11,28 +13,33 @@ const smallDiff = "diff --git a/backend/tests/unit/test_x.py b/backend/tests/uni
 func packetRun() Run {
 	r := run
 	r.GitHubRepo, r.Base, r.Diff = "birunidev/birunidev-space", "bii-504-slice-qa", smallDiff
+	r.BaseSHA, r.HeadSHA = "d79518b0000000000000000000000000000000aa", "189c2ff0000000000000000000000000000000bb"
 	return r
 }
 
 func TestReviewPacketSections(t *testing.T) {
 	o := passed()
 	o.Rounds[1].Checks[0].Cmd = "/home/someone/.theboringfloor/autopilot/venvs/x/bin/python -m pytest -q"
+	o.Rounds[1].Checks[0].Output = "collected 13 items\nGITHUB_TOKEN=ghp_abcdefghijklmnopqrstuvwxyz0123 leaked\n13 passed"
+	o.Rounds[1].Checks = append(o.Rounds[1].Checks, pipeline.CheckResult{Name: "unit", Cmd: "pytest backend/tests", Passed: true, ExitCode: 5, Note: "exit 5 accepted (configured)"})
 	p := ReviewPacket(packetRun(), o)
 	if !strings.HasPrefix(p, PacketHeader) {
 		t.Fatalf("packet must start with %q", PacketHeader)
 	}
 	for _, want := range []string{
-		"STATUS: READY FOR REVIEW", "NOT merged", "CARD: BII-655 — Local key bootstrap",
+		"STATUS: READY FOR EXTERNAL REVIEW", "No AI review was performed", "NOT merged", "CARD: BII-655 — Local key bootstrap",
+		"BASE SHA: d79518b0000000000000000000000000000000aa | HEAD SHA: 189c2ff0000000000000000000000000000000bb",
+		"## 5. git diff --check", "PASS — no whitespace errors", "13 passed", "[REDACTED] leaked", "exit 5 accepted (configured)",
 		"REPO: birunidev/birunidev-space | BRANCH: autopilot/BII-655 -> BASE: bii-504-slice-qa",
 		"PR: " + run.PRURL,
 		"## 1. Allowed scope", "- backend/app/auth/**",
-		"## 2. Files changed (1 files, +3/-0)",
+		"## 2. Files changed (1 files, +3/-0, base..head)",
 		"## 3. Acceptance criteria", "AC1. key shown once", "AC2. revoked key rejected",
 		"## 4. Checks", "`python -m pytest -q` — PASS",
-		"## 5. Independent AI review (round 2 of max 3)", "no test for TTL expiry",
-		"## 6. Open doubts", "## 7. What a human/ChatGPT reviewer should check",
-		"## 8. Diff (complete)", "+def test_x():",
-		"## 9. How to respond", ReviewTag, "Autopilot Queue", "Never move it to Done",
+		"## 6. Rounds (deterministic gates only)", "## 7. Implementer notes",
+		"## 8. What the external reviewer should check",
+		"## 9. Diff (complete, base..head)", "+def test_x():",
+		"## 10. How to respond", ReviewTag, "Autopilot Queue", "Never move it to Done",
 	} {
 		if !strings.Contains(p, want) {
 			t.Errorf("packet missing %q", want)
@@ -41,11 +48,11 @@ func TestReviewPacketSections(t *testing.T) {
 	if strings.Contains(p, "/home/someone") {
 		t.Fatal("local path leaked into the packet")
 	}
-	if strings.Count(p, "```") != 2 {
-		t.Fatalf("diff fence broke the code block (fences=%d)", strings.Count(p, "```"))
+	if strings.Count(p, "```")%2 != 0 {
+		t.Fatalf("a fence broke out of its code block (fences=%d)", strings.Count(p, "```"))
 	}
-	if strings.Contains(p, "SECRET_TOKEN") {
-		t.Fatal("command output leaked into the packet")
+	if strings.Contains(p, "ghp_abcdefghijklmnopqrstuvwxyz0123") {
+		t.Fatal("token-shaped string not redacted")
 	}
 }
 
@@ -61,7 +68,7 @@ func TestReviewPacketTruncatesLongDiff(t *testing.T) {
 	if !strings.Contains(p, "truncated to the first 400 lines") || strings.Contains(p, "+line 999") {
 		t.Fatal("long diff not truncated")
 	}
-	if !strings.Contains(p, "(1 files, +1000/-0)") {
+	if !strings.Contains(p, "(1 files, +1000/-0, base..head)") {
 		t.Fatal("diff stat must count the full diff, not the truncated part")
 	}
 }
@@ -74,6 +81,20 @@ func TestShortCmd(t *testing.T) {
 	} {
 		if got := ShortCmd(in); got != want {
 			t.Errorf("ShortCmd(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestPacketShowsDiffCheckFailureAndMissingDiff(t *testing.T) {
+	o := passed()
+	o.Rounds[1].DiffCheckOK = false
+	o.Rounds[1].DiffCheck = "docs/x.md:3: trailing whitespace."
+	r := packetRun()
+	r.Diff, r.HeadSHA = "", ""
+	p := ReviewPacket(r, o)
+	for _, want := range []string{"FAIL", "trailing whitespace", "HEAD SHA: Unavailable", "## 9. Diff\nUnavailable"} {
+		if !strings.Contains(p, want) {
+			t.Errorf("packet missing %q", want)
 		}
 	}
 }

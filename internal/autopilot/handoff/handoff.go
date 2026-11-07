@@ -29,6 +29,8 @@ type Run struct {
 	// Review packet extras (set by the engine when a card reaches Review).
 	GitHubRepo string // owner/name
 	Base       string // branch the PR targets
+	BaseSHA    string // commit the branch was cut from
+	HeadSHA    string // commit pushed for the PR
 	Diff       string // full patch against the base
 }
 
@@ -48,7 +50,11 @@ func checksLines(cs []pipeline.CheckResult) string {
 		if !c.Passed {
 			st = fmt.Sprintf("FAIL (exit %d)", c.ExitCode)
 		}
-		fmt.Fprintf(&b, "- `%s` — %s\n", ShortCmd(c.Cmd), st)
+		note := ""
+		if c.Note != "" {
+			note = " · " + c.Note
+		}
+		fmt.Fprintf(&b, "- `%s` — %s%s\n", ShortCmd(c.Cmd), st, note)
 	}
 	return b.String()
 }
@@ -64,24 +70,6 @@ func ShortCmd(cmd string) string {
 	return strings.Join(fields, " ")
 }
 
-func reviewerLines(vs []pipeline.Verdict) string {
-	var b strings.Builder
-	for _, v := range vs {
-		fmt.Fprintf(&b, "- %s: **%s** — %s\n", v.Reviewer, v.Verdict, oneLine(v.Summary))
-		for _, f := range v.Findings {
-			loc := ""
-			if f.File != "" {
-				loc = " " + f.File
-				if f.Line > 0 {
-					loc = fmt.Sprintf(" %s:%d", f.File, f.Line)
-				}
-			}
-			fmt.Fprintf(&b, "  - [%s]%s %s\n", f.Severity, loc, oneLine(f.Issue))
-		}
-	}
-	return b.String()
-}
-
 func roundHistory(o pipeline.Outcome) string {
 	var b strings.Builder
 	for _, r := range o.Rounds {
@@ -89,7 +77,10 @@ func roundHistory(o pipeline.Outcome) string {
 		if r.Passed() {
 			status = "passed"
 		}
-		fmt.Fprintf(&b, "- round %d: %s (%d gate findings, %d blocker/major findings)\n", r.N, status, len(r.Gates), len(r.Findings())-len(r.Gates))
+		fmt.Fprintf(&b, "- round %d: %s (%d gate findings)\n", r.N, status, len(r.Gates))
+		for _, f := range r.Gates {
+			fmt.Fprintf(&b, "  - [%s] %s %s\n", f.Severity, f.File, oneLine(clip(f.Issue, 300)))
+		}
 	}
 	return b.String()
 }
@@ -100,13 +91,6 @@ func doubts(o pipeline.Outcome) string {
 		return "- none recorded\n"
 	}
 	var b strings.Builder
-	for _, v := range last.Verdicts {
-		for _, f := range v.Findings {
-			if f.Severity == "minor" {
-				fmt.Fprintf(&b, "- (%s) %s\n", v.Reviewer, oneLine(f.Issue))
-			}
-		}
-	}
 	if s := strings.TrimSpace(last.Implementer); s != "" {
 		fmt.Fprintf(&b, "- implementer's own notes (not independently verified): %s\n", oneLine(clip(s, 700)))
 	}
@@ -132,8 +116,6 @@ func HandoffComment(r Run, o pipeline.Outcome) string {
 	for i, ac := range o.Preflight.AcceptanceCriteria {
 		fmt.Fprintf(&b, "%d. %s\n", i+1, oneLine(ac))
 	}
-	b.WriteString("\n**What reviewers flagged** (final round)\n")
-	b.WriteString(reviewerLines(last.Verdicts))
 	b.WriteString("\n**Review rounds**\n" + roundHistory(o))
 	b.WriteString("\n**Open doubts**\n" + doubts(o))
 	b.WriteString(footer)
@@ -210,7 +192,6 @@ func PRBody(r Run, o pipeline.Outcome) string {
 		fmt.Fprintf(&b, "- [ ] %s\n", oneLine(ac))
 	}
 	b.WriteString("\n## Verification (run by the autopilot)\n" + checksLines(last.Checks))
-	b.WriteString("\n## Independent review (final round)\n" + reviewerLines(last.Verdicts))
 	b.WriteString("\n## Review rounds\n" + roundHistory(o))
 	b.WriteString("\n## Open doubts\n" + doubts(o))
 	fmt.Fprintf(&b, "\nScope: %s\nRun: `%s`\n", strings.Join(o.Preflight.ScopePaths, ", "), r.ID)

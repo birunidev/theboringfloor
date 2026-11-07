@@ -161,6 +161,41 @@ func TestChangedFilesAndDiff(t *testing.T) {
 	}
 }
 
+func TestDiffIncludesNewFilesAndDiffCheck(t *testing.T) {
+	repo, _ := fixture(t)
+	ctx := context.Background()
+	m := Manager{Root: filepath.Join(t.TempDir(), "wt")}
+	wt, err := m.Prepare(ctx, repo, "BII-840")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A brand-new, never-staged file: the BII-840/BII-825 empty-diff case.
+	os.MkdirAll(filepath.Join(wt.Path, "docs"), 0o755)
+	os.WriteFile(filepath.Join(wt.Path, "docs", "note.md"), []byte("# Note\nclean line\n"), 0o644)
+	d, err := Diff(ctx, wt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(d, "docs/note.md") || !strings.Contains(d, "+clean line") {
+		t.Fatalf("diff misses the new untracked file:\n%s", d)
+	}
+	if out, ok, err := DiffCheck(ctx, wt); err != nil || !ok {
+		t.Fatalf("clean diff --check: ok=%v err=%v out=%s", ok, err, out)
+	}
+	os.WriteFile(filepath.Join(wt.Path, "docs", "note.md"), []byte("# Note\ntrailing space \n"), 0o644)
+	out, ok, err := DiffCheck(ctx, wt)
+	if err != nil || ok || !strings.Contains(out, "trailing whitespace") {
+		t.Fatalf("whitespace error not reported: ok=%v err=%v out=%q", ok, err, out)
+	}
+	if cached := run(t, wt.Path, "diff", "--cached", wt.BaseSHA); strings.Contains(cached, "+trailing") || strings.Contains(cached, "+clean") {
+		t.Fatalf("intent-to-add staged file content:\n%s", cached)
+	}
+	head, err := HeadSHA(ctx, wt)
+	if err != nil || head != wt.BaseSHA {
+		t.Fatalf("head = %q err=%v, want base %s before any commit", head, err, wt.BaseSHA)
+	}
+}
+
 func TestPrepareDetached(t *testing.T) {
 	repo, _ := fixture(t)
 	ctx := context.Background()

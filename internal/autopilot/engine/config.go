@@ -18,6 +18,9 @@ import (
 type Check struct {
 	Name string   `json:"name"`
 	Argv []string `json:"argv"`
+	// AllowExit lists non-zero exit codes that still count as a pass and are
+	// noted in the evidence (e.g. pytest 5 = "no tests collected").
+	AllowExit []int `json:"allow_exit,omitempty"`
 }
 
 // BoardConfig maps one Space board to one repository.

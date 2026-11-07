@@ -17,18 +17,13 @@ var run = Run{ID: "20261106T010203.000Z", CardKey: "BII-655", Title: "Local key 
 func passed() pipeline.Outcome {
 	return pipeline.Outcome{
 		Kind:    pipeline.ReadyForReview,
-		Summary: "passed all gates and 3 reviewers in round 2",
+		Summary: "passed sandboxed checks and gates in round 2; awaiting external review",
 		Preflight: pipeline.Preflight{Ready: true, AcceptanceCriteria: []string{"key shown once", "revoked key rejected"},
 			ScopePaths: []string{"backend/app/auth/**"}},
 		Rounds: []pipeline.Round{
 			{N: 1, Gates: []pipeline.Finding{{Severity: "blocker", Issue: "check pytest failed"}}},
 			{N: 2, Implementer: "Added key hashing.\nUnsure about rotation TTL.", Files: []string{"backend/app/auth/keys.py"},
-				Checks: []pipeline.CheckResult{{Name: "pytest", Cmd: "pytest -q", Passed: true, Output: "SECRET_TOKEN=abc 12 passed"}},
-				Verdicts: []pipeline.Verdict{
-					{Reviewer: pipeline.ReviewerAC, Verdict: "pass", Summary: "all met"},
-					{Reviewer: pipeline.ReviewerChecks, Verdict: "pass", Findings: []pipeline.Finding{{Severity: "minor", Issue: "no test for TTL expiry"}}},
-					{Reviewer: pipeline.ReviewerScope, Verdict: "pass"},
-				}},
+				Checks: []pipeline.CheckResult{{Name: "pytest", Cmd: "pytest -q", Passed: true, Output: "SECRET_TOKEN=abc 12 passed"}}, DiffCheckOK: true},
 		},
 	}
 }
@@ -38,7 +33,7 @@ func TestHandoffComment(t *testing.T) {
 	for _, want := range []string{
 		"[AUTOPILOT HANDOFF — 2026-11-06 01:02 UTC | run 20261106T010203.000Z]",
 		run.PRURL, "NOT Done", "`backend/app/auth/keys.py`", "`pytest -q` — PASS",
-		"1. key shown once", "no test for TTL expiry", "not independently verified", "round 1: failed", "round 2: passed",
+		"1. key shown once", "not independently verified", "round 1: failed", "round 2: passed",
 	} {
 		if !strings.Contains(c, want) {
 			t.Errorf("handoff missing %q\n%s", want, c)
@@ -52,7 +47,7 @@ func TestHandoffComment(t *testing.T) {
 func TestBlockedComment(t *testing.T) {
 	o := passed()
 	o.Kind, o.Summary, o.Err = pipeline.Blocked, "still failing after 3 review rounds", errors.New("per-card token cap reached")
-	o.Rounds[1].Verdicts[0] = pipeline.Verdict{Reviewer: pipeline.ReviewerAC, Verdict: "fail", Findings: []pipeline.Finding{{Severity: "blocker", File: "a.py", Issue: "criterion 2 not met"}}}
+	o.Rounds[1].Gates = []pipeline.Finding{{Severity: "blocker", File: "a.py", Issue: "criterion 2 not met"}}
 	r := run
 	r.PRURL = ""
 	c := BlockedComment(r, o)
