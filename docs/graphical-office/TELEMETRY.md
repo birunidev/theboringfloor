@@ -31,13 +31,13 @@ results. Old-card events remain literal activity, without moving the worker or
 coloring current desks. A newer active snapshot invalidates an older terminal
 display. Idle snapshots always place the worker at Queue without a carried card.
 
-`stage-done` means Done, including **Done · Verdict unknown** for reviewers.
-The existing worker logs reviewer JSON inside the free-text `msg` field; this
-viewer does not parse that string to claim a verdict. There is no documented
-native structured target/result contract for checks or reviewer verdicts, and
-no current checks-execution stage. Therefore checks and verdicts remain Unknown.
-Unattributed verdict objects are available verbatim in Activity details.
-No optional board-list or checks/verdict adapter is invented in this version.
+`stage-done` means Done for the two model stages that remain: pre-flight and
+implementation. The coding-only worker has no reviewer stages. External review
+by the founder, ChatGPT or CTO happens after the draft PR reaches Review and is
+not depicted as live office work. There is no structured live contract for
+sandboxed checks or deterministic gate results, and no checks-execution stage.
+Therefore checks and gate desks remain Unknown. Legacy reviewer records remain
+literal Activity history but never activate a worker or gate desk.
 
 Attributable `end` events populate session shelves, deduplicated by run/card.
 They do not claim board membership or set STOP. Native PR URLs are accepted only
@@ -78,3 +78,48 @@ errors, event payloads and configuration-derived names. The CSP disallows
 external scripts, connections and embedding. Theme/motion preferences use local
 browser storage as specified. `--test-data` only adds the visible TEST DATA
 label; it never supplies fallback telemetry or changes the state mapping.
+
+## Office readability additions (founder-approved, 7 Nov 2026)
+
+The later founder decision moved review outside the autopilot. It supersedes the
+original reviewer-desk model in `VISUAL_SPEC.md`. The office now shows the
+coding sprint only: pre-flight, implementation, sandboxed checks, deterministic
+gates, publish and outcome. Every live value below is read from existing
+telemetry; nothing new is inferred.
+
+| What the office now shows | Exact source |
+|---|---|
+| Office status strip (Working / Between reported stages / Stopped / Error reported / Ready for review / Questions asked / On hold / Idle) | `status.json` state+stage+updatedAt, STOP, current-run `error` and `end` records; precedence in `officeState()` |
+| Who handles a desk | Stage → role as the engine assigns it: `preflight` Pre-flight agent and `implement:N` Implementer; claim/setup/checks/gates/publish Autopilot engine (no model) |
+| Desk facts `✓ allowed · × rejected · tokens` | Current-run `permission` records carry `stage` and `data.allow`; `stage-done.data.billable` |
+| Between reported stages | The status stage already has `stage-done` and no new stage started. Checks and publish emit no log records today, so they appear here, never as Working |
+| Inspector (dialog) | Literal `stage.msg` (session), `stage.ts`, `stage-done.ts`, `billable`, last 10 `permission` records with literal reasons, `stage-done.msg` labeled "Agent's own summary · not verified". Missing fields say Unavailable and name the missing record |
+| Idle activity | `lastRun`: the most recently modified `runs/*/*.jsonl` when `status.json` names no log; static history, no animation, never attributed to the current status |
+| Outcome shelves | `todayOutcomes`: `end` records dated today (server-local) from run logs modified today, deduplicated by run/card; labeled "Today, from run logs"; not board membership |
+
+Still Unknown until the engine instrumentation PR: checks execution and
+results, deterministic scope/sensitive/diff gate results, claim/setup/publish
+timing and sessions, failure reason (gate failure vs error vs cap), outcome card
+titles, and the queue.
+
+## Parallel lanes (`workers.json`)
+
+With two or more active lanes the engine writes `status.json` as a summary
+(`state: running`, no card/stage/log path, note "N lanes active; see
+workers.json"). Each lane's card, stage, round and log path exist only in
+`workers.json`. The office reads it as follows; nothing is inferred.
+
+| Rule | Detail |
+|---|---|
+| Absent file | No lane data, no error. "Absence means no parallel-lane run has been recorded." |
+| Parse | Rooted read, 1 MiB cap. Version must be 1, `workers` an array, at most 8 lanes, lane names unique and non-empty. Anything else is `workersError`, no lanes. |
+| Pairing | Lanes are used only when `workers.json.updatedAt` equals `status.json.updatedAt`. `Engine.persistStatusesLocked` writes both in one call with one timestamp. Older means a later single-worker write; newer means an unpaired write. Both are ignored with a stated reason, so a crash can never leave ghost lanes. |
+| State consistency | Zero lanes require `idle`; one lane must be mirrored exactly by `status.json` (state, run, card); two or more require the summary (`running`, no card). |
+| Lane logs | Each lane's `logPath` must resolve inside `runs/` (rooted; escaping paths and symlinks are refused per lane). Records are labelled with the lane, streamed over `/api/events`, and attributed to a lane only by its own log plus the run and card it reports now. |
+| Card usage | Per-lane lifetime card tokens from `usage.json` `cards`, shown against the configured per-card cap. Unknown shows "usage unavailable". |
+| Lane mode | Two or more usable lanes. One static worker per lane at its last reported desk (no walking or animation), lane list, lane-aware desk badges, per-lane inspector sections. One lane is already mirrored by `status.json`, so the single-worker view is unchanged apart from lane-labelled activity. |
+| Missing detail | `status.json` says lanes are active but detail is absent, unpaired or unreadable: a visible warning with the reason; no lanes drawn. |
+| Finished history | "Last run" history is never offered while `status.json` says running. |
+
+Still Unknown: checks, guardrail results, per-lane queue, failure reasons. They
+need the instrumentation PR.
