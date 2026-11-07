@@ -39,6 +39,19 @@ type runInfo struct {
 	Run      string `json:"run"`
 	Modified string `json:"modified"`
 }
+
+// outcome is one real `end` event from a run log written today (server-local
+// day). It is a run record, never a claim about current board membership.
+type outcome struct {
+	Card    string `json:"card"`
+	Run     string `json:"run"`
+	Kind    string `json:"kind"`
+	Summary string `json:"summary"`
+	PR      string `json:"pr"`
+	Rounds  *int64 `json:"rounds"`
+	TS      string `json:"ts"`
+	EventID string `json:"eventId"`
+}
 type snapshot struct {
 	Status       *status   `json:"status"`
 	StatusError  string    `json:"statusError"`
@@ -61,6 +74,15 @@ type snapshot struct {
 	LogError     string    `json:"logError"`
 	Controls     bool      `json:"controls"`
 	TestData     bool      `json:"testData"`
+	// LastRun is the most recently modified run log, offered as static
+	// history only while status.json names no current log (idle).
+	LastRun      *runInfo `json:"lastRun"`
+	LastEvents   []event  `json:"lastEvents"`
+	LastRunError string   `json:"lastRunError"`
+	// TodayOutcomes are real `end` events from run logs dated today.
+	TodayOutcomes []outcome `json:"todayOutcomes"`
+	OutcomesDay   string    `json:"outcomesDay"`
+	OutcomesError string    `json:"outcomesError"`
 }
 
 func str(m rawObject, key string) string { var s string; json.Unmarshal(m[key], &s); return s }
@@ -121,7 +143,7 @@ func readStatus(root *os.Root) (*status, error) {
 }
 
 func (o *office) snapshot() snapshot {
-	s := snapshot{Controls: o.controls, TestData: o.testData, Boards: []string{}, Runs: []runInfo{}, Events: []event{}}
+	s := snapshot{Controls: o.controls, TestData: o.testData, Boards: []string{}, Runs: []runInfo{}, Events: []event{}, LastEvents: []event{}, TodayOutcomes: []outcome{}}
 	now := o.now()
 	zone, _ := now.Zone()
 	s.Timezone = zone
@@ -194,6 +216,30 @@ func (o *office) snapshot() snapshot {
 	if err != nil {
 		s.RunsError = "Recent runs unavailable"
 	}
+	all, allErr := allRuns(root)
+	s.OutcomesDay = now.Format("2006-01-02")
+	if allErr != nil {
+		s.OutcomesError = "Run logs unavailable"
+	} else {
+		s.TodayOutcomes, s.OutcomesError = o.todayOutcomes(root, all, now)
+	}
+	if (s.Status == nil || s.Status.LogPath == "") && allErr == nil && len(all) > 0 {
+		last := all[0]
+		s.LastRun = &last
+		f, identity, err := o.openLog(root, filepath.Join("runs", last.Card, last.Run+".jsonl"))
+		if err != nil {
+			s.LastRunError = "Last run unavailable"
+		} else {
+			s.LastEvents, err = tailEvents(f, identity, 500)
+			f.Close()
+			if err != nil {
+				s.LastRunError = "Last run unavailable"
+			}
+			for i := range s.LastEvents {
+				s.LastEvents[i].History = true
+			}
+		}
+	}
 	if s.Status != nil && s.Status.LogPath != "" {
 		f, identity, err := o.openLog(root, s.Status.LogPath)
 		if err != nil {
@@ -220,6 +266,16 @@ func (o *office) snapshot() snapshot {
 }
 
 func recentRuns(root *os.Root) ([]runInfo, error) {
+	list, err := allRuns(root)
+	return list[:min(20, len(list))], err
+}
+
+// maxRunFiles bounds how many run logs one snapshot inspects.
+const maxRunFiles = 2000
+
+// allRuns lists run logs (newest first) under runs/<card>/<run>.jsonl,
+// skipping symlinks and non-regular files. Reads stay inside the root.
+func allRuns(root *os.Root) ([]runInfo, error) {
 	list := []runInfo{}
 	f, err := root.Open("runs")
 	if errors.Is(err, os.ErrNotExist) {
@@ -253,7 +309,80 @@ func recentRuns(root *os.Root) ([]runInfo, error) {
 		}
 	}
 	sort.Slice(list, func(i, j int) bool { return list[i].Modified > list[j].Modified })
-	return list[:min(20, len(list))], nil
+	return list[:min(maxRunFiles, len(list))], nil
+}
+
+// tailEvents reads up to limit records from the last 4 MiB of a log.
+func tailEvents(f *os.File, identity string, limit int) ([]event, error) {
+	offset := int64(0)
+	if info, err := f.Stat(); err == nil && info.Size() > 4<<20 {
+		offset = info.Size() - (4 << 20)
+		if _, err := f.Seek(offset, io.SeekStart); err != nil {
+			return nil, err
+		}
+		prefix, _ := bufio.NewReader(f).ReadBytes('\n')
+		offset += int64(len(prefix))
+	}
+	evs, _, err := readEvents(f, identity, offset, limit)
+	return evs, err
+}
+
+// todayOutcomes collects real `end` events dated today (server-local) from
+// run logs modified today. Unreadable logs are skipped and reported once.
+func (o *office) todayOutcomes(root *os.Root, runs []runInfo, now time.Time) ([]outcome, string) {
+	day := now.Format("2006-01-02")
+	out := []outcome{}
+	seen := map[string]bool{}
+	failed := false
+	for _, r := range runs {
+		mod, err := time.Parse(time.RFC3339, r.Modified)
+		if err != nil || mod.In(now.Location()).Format("2006-01-02") != day {
+			continue
+		}
+		f, identity, err := o.openLog(root, filepath.Join("runs", r.Card, r.Run+".jsonl"))
+		if err != nil {
+			failed = true
+			continue
+		}
+		evs, err := tailEvents(f, identity, 500)
+		f.Close()
+		if err != nil {
+			failed = true
+		}
+		for _, e := range evs {
+			if str(e.Native, "kind") != "end" {
+				continue
+			}
+			var data rawObject
+			if json.Unmarshal(e.Native["data"], &data) != nil {
+				continue
+			}
+			kind := str(data, "kind")
+			if kind != "ready-for-review" && kind != "needs-clarification" && kind != "blocked" {
+				continue
+			}
+			ts := str(e.Native, "ts")
+			t, err := time.Parse(time.RFC3339Nano, ts)
+			if err != nil || t.In(now.Location()).Format("2006-01-02") != day {
+				continue
+			}
+			card, run := str(e.Native, "card"), str(e.Native, "run")
+			if card == "" || run == "" || seen[run+":"+card] {
+				continue
+			}
+			seen[run+":"+card] = true
+			out = append(out, outcome{Card: card, Run: run, Kind: kind, Summary: str(data, "summary"),
+				PR: str(data, "pr"), Rounds: number(data, "rounds", true), TS: ts, EventID: e.ID})
+		}
+		if len(out) >= 200 {
+			break
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].TS < out[j].TS })
+	if failed {
+		return out, "Some run logs were unreadable"
+	}
+	return out, ""
 }
 
 func (o *office) openLog(root *os.Root, path string) (*os.File, string, error) {

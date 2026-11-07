@@ -1,0 +1,215 @@
+PASS idle 1440 light: strip — – Idle · last run BII-TEST-CLARIFY: Questions asked
+PASS idle 1440 light: TEST DATA label visible
+PASS idle 1440 light: last-run activity
+PASS idle 1440 light: shelves subtitle
+PASS idle 1440 light: review shelf from today's logs
+PASS idle 1440 light: no worker label when idle
+PASS idle 1440 light: active desks
+PASS idle 1440 light: no horizontal overflow — 0px
+PASS idle 1440 light: no external requests
+PASS idle 1440 dark: strip — – Idle · last run BII-TEST-CLARIFY: Questions asked
+PASS idle 1440 dark: TEST DATA label visible
+PASS idle 1440 dark: last-run activity
+PASS idle 1440 dark: shelves subtitle
+PASS idle 1440 dark: review shelf from today's logs
+PASS idle 1440 dark: no worker label when idle
+PASS idle 1440 dark: active desks
+PASS idle 1440 dark: no horizontal overflow — 0px
+PASS idle 1440 dark: no external requests
+PASS idle 390 light: strip — – Idle · last run BII-TEST-CLARIFY: Questions asked
+PASS idle 390 light: TEST DATA label visible
+PASS idle 390 light: last-run activity
+PASS idle 390 light: shelves subtitle
+PASS idle 390 light: review shelf from today's logs
+PASS idle 390 light: no worker label when idle
+PASS idle 390 light: active desks
+PASS idle 390 light: no horizontal overflow — 0px
+PASS idle 390 light: no external requests
+PASS idle 390 dark: strip — – Idle · last run BII-TEST-CLARIFY: Questions asked
+PASS idle 390 dark: TEST DATA label visible
+PASS idle 390 dark: last-run activity
+PASS idle 390 dark: shelves subtitle
+PASS idle 390 dark: review shelf from today's logs
+PASS idle 390 dark: no worker label when idle
+PASS idle 390 dark: active desks
+PASS idle 390 dark: no horizontal overflow — 0px
+PASS idle 390 dark: no external requests
+PASS active 1440 light: strip — ● Working · Implementing · Implementer
+PASS active 1440 light: TEST DATA label visible
+PASS active 1440 light: worker label text
+PASS active 1440 light: worker label shown only on desktop
+PASS active 1440 light: implement desk facts
+PASS active 1440 light: pre-flight desk facts
+PASS active 1440 light: checks stay unknown
+PASS active 1440 light: active desks
+PASS active 1440 light: no horizontal overflow — 0px
+PASS active 1440 light: inspector shows "session ses_TEST_implement"
+PASS active 1440 light: inspector shows "× Rejected: shell"
+PASS active 1440 light: inspector shows "3 allowed · 1 rejected"
+PASS active 1440 light: inspector shows "Unavailable · reported when the stage finishes"
+PASS active 1440 light: Escape closes inspector and returns focus
+PASS active 1440 light: no external requests
+PASS active 1440 light reduced: strip — ● Working · Implementing · Implementer
+PASS active 1440 light reduced: TEST DATA label visible
+PASS active 1440 light reduced: worker label text
+PASS active 1440 light reduced: worker label shown only on desktop
+PASS active 1440 light reduced: implement desk facts
+PASS active 1440 light reduced: pre-flight desk facts
+PASS active 1440 light reduced: checks stay unknown
+PASS active 1440 light reduced: active desks
+PASS active 1440 light reduced: no horizontal overflow — 0px
+PASS active 1440 light reduced: no external requests
+PASS active 1440 dark: strip — ● Working · Implementing · Implementer
+PASS active 1440 dark: TEST DATA label visible
+PASS active 1440 dark: worker label text
+PASS active 1440 dark: worker label shown only on desktop
+PASS active 1440 dark: implement desk facts
+PASS active 1440 dark: pre-flight desk facts
+PASS active 1440 dark: checks stay unknown
+PASS active 1440 dark: active desks
+PASS active 1440 dark: no horizontal overflow — 0px
+PASS active 1440 dark: inspector shows "session ses_TEST_implement"
+PASS active 1440 dark: inspector shows "× Rejected: shell"
+PASS active 1440 dark: inspector shows "3 allowed · 1 rejected"
+PASS active 1440 dark: inspector shows "Unavailable · reported when the stage finishes"
+PASS active 1440 dark: Escape closes inspector and returns focus
+PASS active 1440 dark: no external requests
+PASS active 1440 dark reduced: strip — ● Working · Implementing · Implementer
+PASS active 1440 dark reduced: TEST DATA label visible
+PASS active 1440 dark reduced: worker label text
+PASS active 1440 dark reduced: worker label shown only on desktop
+PASS active 1440 dark reduced: implement desk facts
+PASS active 1440 dark reduced: pre-flight desk facts
+PASS active 1440 dark reduced: checks stay unknown
+PASS active 1440 dark reduced: active desks
+PASS active 1440 dark reduced: no horizontal overflow — 0px
+PASS active 1440 dark reduced: no external requests
+PASS active 390 light: strip — ● Working · Implementing · Implementer
+PASS active 390 light: TEST DATA label visible
+PASS active 390 light: worker label text
+PASS active 390 light: worker label shown only on desktop
+PASS active 390 light: implement desk facts
+PASS active 390 light: pre-flight desk facts
+PASS active 390 light: checks stay unknown
+PASS active 390 light: active desks
+PASS active 390 light: no horizontal overflow — 0px
+PASS active 390 light: inspector shows "session ses_TEST_implement"
+PASS active 390 light: inspector shows "× Rejected: shell"
+PASS active 390 light: inspector shows "3 allowed · 1 rejected"
+PASS active 390 light: inspector shows "Unavailable · reported when the stage finishes"
+PASS active 390 light: Escape closes inspector and returns focus
+PASS active 390 light: no external requests
+PASS active 390 light reduced: strip — ● Working · Implementing · Implementer
+PASS active 390 light reduced: TEST DATA label visible
+PASS active 390 light reduced: worker label text
+PASS active 390 light reduced: worker label shown only on desktop
+PASS active 390 light reduced: implement desk facts
+PASS active 390 light reduced: pre-flight desk facts
+PASS active 390 light reduced: checks stay unknown
+PASS active 390 light reduced: active desks
+PASS active 390 light reduced: no horizontal overflow — 0px
+PASS active 390 light reduced: no external requests
+PASS active 390 dark: strip — ● Working · Implementing · Implementer
+PASS active 390 dark: TEST DATA label visible
+PASS active 390 dark: worker label text
+PASS active 390 dark: worker label shown only on desktop
+PASS active 390 dark: implement desk facts
+PASS active 390 dark: pre-flight desk facts
+PASS active 390 dark: checks stay unknown
+PASS active 390 dark: active desks
+PASS active 390 dark: no horizontal overflow — 0px
+PASS active 390 dark: inspector shows "session ses_TEST_implement"
+PASS active 390 dark: inspector shows "× Rejected: shell"
+PASS active 390 dark: inspector shows "3 allowed · 1 rejected"
+PASS active 390 dark: inspector shows "Unavailable · reported when the stage finishes"
+PASS active 390 dark: Escape closes inspector and returns focus
+PASS active 390 dark: no external requests
+PASS active 390 dark reduced: strip — ● Working · Implementing · Implementer
+PASS active 390 dark reduced: TEST DATA label visible
+PASS active 390 dark reduced: worker label text
+PASS active 390 dark reduced: worker label shown only on desktop
+PASS active 390 dark reduced: implement desk facts
+PASS active 390 dark reduced: pre-flight desk facts
+PASS active 390 dark reduced: checks stay unknown
+PASS active 390 dark reduced: active desks
+PASS active 390 dark reduced: no horizontal overflow — 0px
+PASS active 390 dark reduced: no external requests
+PASS parallel 1440 light: strip — ● Working · 2 reviewers in parallel (proven by run log)
+PASS parallel 1440 light: TEST DATA label visible
+PASS parallel 1440 light: worker label text
+PASS parallel 1440 light: worker label shown only on desktop
+PASS parallel 1440 light: checks stay unknown
+PASS parallel 1440 light: reviewers active from log
+PASS parallel 1440 light: no horizontal overflow — 0px
+PASS parallel 1440 light: no external requests
+PASS parallel 1440 dark: strip — ● Working · 2 reviewers in parallel (proven by run log)
+PASS parallel 1440 dark: TEST DATA label visible
+PASS parallel 1440 dark: worker label text
+PASS parallel 1440 dark: worker label shown only on desktop
+PASS parallel 1440 dark: checks stay unknown
+PASS parallel 1440 dark: reviewers active from log
+PASS parallel 1440 dark: no horizontal overflow — 0px
+PASS parallel 1440 dark: no external requests
+PASS parallel 390 light: strip — ● Working · 2 reviewers in parallel (proven by run log)
+PASS parallel 390 light: TEST DATA label visible
+PASS parallel 390 light: worker label text
+PASS parallel 390 light: worker label shown only on desktop
+PASS parallel 390 light: checks stay unknown
+PASS parallel 390 light: reviewers active from log
+PASS parallel 390 light: no horizontal overflow — 0px
+PASS parallel 390 light: no external requests
+PASS parallel 390 dark: strip — ● Working · 2 reviewers in parallel (proven by run log)
+PASS parallel 390 dark: TEST DATA label visible
+PASS parallel 390 dark: worker label text
+PASS parallel 390 dark: worker label shown only on desktop
+PASS parallel 390 dark: checks stay unknown
+PASS parallel 390 dark: reviewers active from log
+PASS parallel 390 dark: no horizontal overflow — 0px
+PASS parallel 390 dark: no external requests
+PASS blocked 1440 light: strip — Ⅱ On hold · BII-TEST-BLOCKED
+PASS blocked 1440 light: TEST DATA label visible
+PASS blocked 1440 light: on-hold shelf
+PASS blocked 1440 light: no worker label when idle
+PASS blocked 1440 light: no horizontal overflow — 0px
+PASS blocked 1440 light: no external requests
+PASS blocked 1440 dark: strip — Ⅱ On hold · BII-TEST-BLOCKED
+PASS blocked 1440 dark: TEST DATA label visible
+PASS blocked 1440 dark: on-hold shelf
+PASS blocked 1440 dark: no worker label when idle
+PASS blocked 1440 dark: no horizontal overflow — 0px
+PASS blocked 1440 dark: no external requests
+PASS blocked 390 light: strip — Ⅱ On hold · BII-TEST-BLOCKED
+PASS blocked 390 light: TEST DATA label visible
+PASS blocked 390 light: on-hold shelf
+PASS blocked 390 light: no worker label when idle
+PASS blocked 390 light: no horizontal overflow — 0px
+PASS blocked 390 light: no external requests
+PASS blocked 390 dark: strip — Ⅱ On hold · BII-TEST-BLOCKED
+PASS blocked 390 dark: TEST DATA label visible
+PASS blocked 390 dark: on-hold shelf
+PASS blocked 390 dark: no worker label when idle
+PASS blocked 390 dark: no horizontal overflow — 0px
+PASS blocked 390 dark: no external requests
+PASS stopped 1440 light: strip — Ⅱ Stopped · STOP set · execution still reported running
+PASS stopped 1440 light: TEST DATA label visible
+PASS stopped 1440 light: stopped desk last reported
+PASS stopped 1440 light: no horizontal overflow — 0px
+PASS stopped 1440 light: no external requests
+PASS stopped 1440 dark: strip — Ⅱ Stopped · STOP set · execution still reported running
+PASS stopped 1440 dark: TEST DATA label visible
+PASS stopped 1440 dark: stopped desk last reported
+PASS stopped 1440 dark: no horizontal overflow — 0px
+PASS stopped 1440 dark: no external requests
+PASS stopped 390 light: strip — Ⅱ Stopped · STOP set · execution still reported running
+PASS stopped 390 light: TEST DATA label visible
+PASS stopped 390 light: stopped desk last reported
+PASS stopped 390 light: no horizontal overflow — 0px
+PASS stopped 390 light: no external requests
+PASS stopped 390 dark: strip — Ⅱ Stopped · STOP set · execution still reported running
+PASS stopped 390 dark: TEST DATA label visible
+PASS stopped 390 dark: stopped desk last reported
+PASS stopped 390 dark: no horizontal overflow — 0px
+PASS stopped 390 dark: no external requests
+
+28 screenshots written to docs/graphical-office/evidence
+ALL CHECKS PASSED

@@ -94,7 +94,7 @@ function atlas() {
     "preflight",
     "implement",
     "checks",
-    "review",
+    "gate",
     "publish",
     "shelf-empty",
     "shelf-full",
@@ -137,10 +137,10 @@ function atlas() {
       rect(s, 10, 7, 44, 12);
       for (const x of [17, 28, 39]) rect(s, x, 10, 6, 6, 0);
     }
-    if (kind === "review") {
+    if (kind === "gate") {
       rect(s, 20, 2, 24, 17);
-      rect(s, 27, 0, 10, 4);
-      path(s, "M25 8 H39 M25 12 H39 M25 16 H39", "line");
+      path(s, "M25 7 H39 M25 11 H39 M25 15 H34", "line");
+      path(s, "M36 14 L39 17 L45 9");
     }
     if (kind === "publish") {
       rect(s, 20, 4, 24, 14);
@@ -148,7 +148,7 @@ function atlas() {
       path(s, "M32 12 V0 M27 5 L32 0 L37 5");
     }
   }
-  for (const character of ["worker", "reviewer1", "reviewer2", "reviewer3"])
+  for (const character of ["worker"])
     for (const [state, frames] of Object.entries({
       idle: 1,
       walk: 4,
@@ -161,14 +161,9 @@ function atlas() {
         const s = shape(defs, "symbol", {
           id: `${character}-${state}-${frame}`,
           viewBox: "0 0 40 48",
-          class: character === "worker" ? "worker-symbol" : "reviewer-symbol",
+          class: "worker-symbol",
         });
-        const reviewer = character !== "worker";
-        const g = shape(
-          s,
-          "g",
-          reviewer ? { transform: "translate(4 8) scale(.8)" } : {},
-        );
+        const g = shape(s, "g");
         shape(g, "circle", { cx: 20, cy: 9, r: 7 });
         rect(g, 11, 18, 18, 16, 5, "body");
         let left = [6, 31],
@@ -181,17 +176,11 @@ function atlas() {
         if (state === "think") right = [26 + frame, 14];
         if (state === "success") right = [34, 27 + frame * 4];
         path(g, `M12 22 L${left.join(" ")} M28 22 L${right.join(" ")}`, "limb");
-        if (reviewer) {
-          path(g, "M16 34 L12 39 H6 M24 34 L28 39 H34 M6 41 H34", "limb");
-          rect(g, 15, 28, 15, 11);
-          path(g, "M18 32 H27 M18 35 H27", "paper-line");
-        } else {
-          const step = state === "walk" ? [-4, 0, 4, 0][frame] : 0;
-          path(g, `M16 34 L${14 + step} 46 M24 34 L${26 - step} 46`, "limb");
-          const card = shape(g, "g", { class: "carried" });
-          rect(card, 25, 22, 12, 15);
-          path(card, "M28 27 H34 M28 31 H34", "paper-line");
-        }
+        const step = state === "walk" ? [-4, 0, 4, 0][frame] : 0;
+        path(g, `M16 34 L${14 + step} 46 M24 34 L${26 - step} 46`, "limb");
+        const card = shape(g, "g", { class: "carried" });
+        rect(card, 25, 22, 12, 15);
+        path(card, "M28 27 H34 M28 31 H34", "paper-line");
       }
 }
 atlas();
@@ -201,65 +190,140 @@ const stationDefs = [
   ["setup", "Setup", "setup", 560, 112],
   ["preflight", "Pre-flight", "preflight", 784, 112],
   ["implement", "Implement", "implement", 1120, 112],
-  ["checks", "Checks", "checks", 1120, 232],
-  ["acceptance", "Acceptance criteria", "review", 224, 352],
-  ["tests", "Tests/lint/build", "review", 672, 352],
-  ["diff", "Diff scope", "review", 1120, 352],
+  ["checks", "Sandboxed checks", "checks", 1120, 232],
+  ["scope", "Scope gate", "gate", 224, 352],
+  ["sensitive", "Sensitive/CI gate", "gate", 672, 352],
+  ["diff", "Diff evidence gate", "gate", 1120, 352],
   ["publish", "Publish", "publish", 672, 472],
 ];
-const stations = new Map(),
-  reviewerContainer = el("div", null, "reviewers");
-let reviewerIndex = 0;
+const stations = new Map();
 for (const [id, name, prop, x, y] of stationDefs) {
   const section = el("section", null, `station ${id}`);
   section.id = `station-${id}`;
   section.setAttribute("aria-label", name);
   section.append(graphic(`prop-${prop}`, "prop", 64, 40));
   const copy = el("div", null, "station-copy"),
-    heading = el("h3", name),
-    badge = el("p", "? Unknown", "badge");
-  copy.append(heading, badge);
+    heading = el("h3"),
+    button = el("button", name, "desk-name"),
+    badge = el("p", "? Unknown", "badge"),
+    facts = el("p", "", "facts");
+  button.setAttribute("aria-haspopup", "dialog");
+  button.addEventListener("click", () => openInspector(id, button));
+  heading.append(button);
+  facts.hidden = true;
+  copy.append(heading, badge, facts);
   section.append(copy);
-  const item = { id, section, badge, x, y, result: "Unknown" };
+  const item = { id, section, badge, facts, button, x, y, result: "Unknown" };
   if (id === "queue") {
     badge.textContent = "Queue unavailable";
     badge.className = "meta";
   }
-  if (prop === "review") {
-    reviewerIndex++;
-    item.reviewer = reviewerIndex;
-    section.classList.add("reviewer");
-    section.append(el("span", String(reviewerIndex), "role"));
-    const holder = el("div", null, "reviewer-character");
-    holder.append(
-      graphic(
-        `reviewer${reviewerIndex}-idle-0`,
-        "character reviewer-pose",
-        40,
-        48,
-      ),
-    );
-    section.append(holder);
-    item.pose = holder;
-    reviewerContainer.append(section);
-  } else $("stations").insertBefore(section, $("worker"));
+  $("stations").insertBefore(section, $("worker"));
   stations.set(id, item);
 }
-$("stations").insertBefore(reviewerContainer, stations.get("publish").section);
 // The DOM follows process order independently of desktop grid placement.
 const stageMap = {
   claim: ["claim", "Claiming card", "work"],
   setup: ["setup", "Setting up", "work"],
   preflight: ["preflight", "Pre-flight", "think"],
-  "review:acceptance-criteria": [
-    "acceptance",
-    "Review · Acceptance criteria",
-    "think",
-  ],
-  "review:tests-lint-build": ["tests", "Review · Tests/lint/build", "think"],
-  "review:diff-scope": ["diff", "Review · Diff scope", "think"],
   publish: ["publish", "Publishing draft PR", "work"],
 };
+// Who handles each desk. External review is deliberately outside this office.
+// Only pre-flight and implementation create model sessions; all guardrails are
+// deterministic engine work and stay Unknown without structured telemetry.
+const roleOf = {
+  queue: "Queue",
+  claim: "Autopilot engine",
+  setup: "Autopilot engine",
+  preflight: "Pre-flight agent",
+  implement: "Implementer",
+  checks: "Autopilot engine",
+  scope: "Autopilot engine",
+  sensitive: "Autopilot engine",
+  diff: "Autopilot engine",
+  publish: "Autopilot engine",
+};
+const modelRole = new Set(["preflight", "implement"]);
+// Steps that write no run-log events today (status.json only, or nothing).
+const telemetryGap = {
+  queue:
+    "Queue unavailable: board lists are not part of the autopilot telemetry. Missing: a queue snapshot (list name, card keys/titles, retrieval time).",
+  claim:
+    "This step is reported only in status.json while it runs; the run log has no stage event for it, so session, times and activity are unavailable.",
+  setup:
+    "This step is reported only in status.json while it runs; the run log has no stage event for it, so session, times and activity are unavailable.",
+  checks:
+    "Sandboxed checks · Unknown: the autopilot runs checks in a sandbox but logs no checks event (no stage, result or exit code), so nothing here can be shown as passed or failed.",
+  scope:
+    "Scope gate · Unknown: scope and empty-diff results are not emitted as structured run-log fields, so this desk cannot claim pass or fail.",
+  sensitive:
+    "Sensitive/CI gate · Unknown: sensitive-file and CI-file guardrail results are not emitted as structured run-log fields.",
+  diff:
+    "Diff evidence gate · Unknown: git diff --check and complete-diff results are included in the evidence packet but are not emitted as structured live telemetry.",
+  publish:
+    "This step is reported only in status.json while it runs; the run log has no stage event for it, so its PR result appears only in the final outcome.",
+};
+const textOr = (v, fallback) => (typeof v === "string" && v ? v : fallback);
+// Per-desk facts from real run-log records: the latest stage event opens a
+// desk (its literal msg names the session), permission records carry their
+// stage, and stage-done closes it with billable tokens and the agent summary.
+function deskFacts(rows) {
+  const facts = new Map();
+  for (const row of rows) {
+    const n = row.native;
+    if (typeof n.stage !== "string") continue;
+    const id = stageInfo({ stage: n.stage })?.[0];
+    if (!id) continue;
+    let f = facts.get(id);
+    if (n.kind === "stage" || !f) {
+      f = {
+        stage: n.stage,
+        session: null,
+        started: null,
+        doneSeen: false,
+        done: null,
+        billable: null,
+        summary: null,
+        allowed: 0,
+        rejected: 0,
+        perms: [],
+      };
+      facts.set(id, f);
+    }
+    if (n.kind === "stage") {
+      f.session = textOr(n.msg, null);
+      f.started = textOr(n.ts, null);
+    } else if (n.kind === "permission") {
+      if (n.data?.allow === true) f.allowed++;
+      else if (n.data?.allow === false) f.rejected++;
+      f.perms.push({
+        ts: textOr(n.ts, ""),
+        action: textOr(n.data?.action, "Unavailable"),
+        allow: n.data?.allow,
+        reason: textOr(n.msg, ""),
+      });
+      if (f.perms.length > 10) f.perms.shift();
+    } else if (n.kind === "stage-done") {
+      f.doneSeen = true;
+      f.done = textOr(n.ts, null);
+      f.billable = validNumber(n.data?.billable) ? n.data.billable : null;
+      f.summary = textOr(n.msg, null);
+    }
+  }
+  return facts;
+}
+const sortedRows = () => [...events.values()].sort(eventOrder);
+const currentRows = () =>
+  sortedRows().filter((row) => isCurrent(row, eventContext(row)));
+const lastRows = () =>
+  snapshot?.lastRun
+    ? sortedRows().filter(
+        (row) =>
+          row.lastRun &&
+          row.native.run === snapshot.lastRun.run &&
+          row.native.card === snapshot.lastRun.card,
+      )
+    : [];
 const shelves = new Map();
 for (const [kind, name, tone] of [
   ["ready-for-review", "Review", "success"],
@@ -270,7 +334,8 @@ for (const [kind, name, tone] of [
     head = el("div", null, "shelf-head"),
     icon = graphic("prop-shelf-empty", "shelf-icon", 64, 40),
     labels = el("div");
-  labels.append(el("h3", name), el("p", "This session", "meta"));
+  const subtitle = el("p", "This session", "meta");
+  labels.append(el("h3", name), subtitle);
   head.append(icon, labels);
   const list = el("div"),
     empty = el("p", "No recorded outcomes", "meta"),
@@ -280,6 +345,7 @@ for (const [kind, name, tone] of [
   $("shelves").append(section);
   const shelf = {
     kind,
+    subtitle,
     section,
     icon,
     list,
@@ -373,19 +439,6 @@ function pose(state = "idle", frame = 0) {
   workerGraphic
     .querySelector("use")
     .setAttribute("href", `#worker-${state}-${frame}`);
-  for (const item of stations.values())
-    if (item.reviewer) {
-      const reviewerState =
-        item.id === active && ["think", "success", "fail"].includes(state)
-          ? state
-          : "idle";
-      item.pose
-        .querySelector("use")
-        .setAttribute(
-          "href",
-          `#reviewer${item.reviewer}-${reviewerState}-${reviewerState === "idle" ? 0 : frame}`,
-        );
-    }
 }
 function cancelMotion() {
   if (motion) {
@@ -459,7 +512,7 @@ function anchor(id) {
     };
   return {
     left: (box.right - parent.left) / scale - 28,
-    top: (box.top - parent.top) / scale + (station.reviewer ? 76 : 84),
+    top: (box.top - parent.top) / scale + 84,
   };
 }
 function placeWorker() {
@@ -505,13 +558,6 @@ function moveWorker(from, to, kind, animate) {
       route.push(
         point(aisleX, source.top),
         point(aisleX, target.top),
-        point(target.left, target.top),
-      );
-    } else if (from === "checks" && to === "acceptance") {
-      route.push(
-        point(source.left, 240),
-        point(0, 240),
-        point(0, target.top),
         point(target.left, target.top),
       );
     } else {
@@ -604,6 +650,10 @@ function renderState(s, fromNetwork = true) {
     }
   }
   for (const row of s.events || []) addEvent(row, true);
+  // Idle: the latest finished run is offered as static history only.
+  if (!s.logAvailable)
+    for (const row of s.lastEvents || []) addEvent({ ...row, lastRun: true }, true);
+  for (const o of s.todayOutcomes || []) addOutcome(o);
   done.clear();
   terminal = null;
   errorEvent = null;
@@ -737,9 +787,15 @@ function renderState(s, fromNetwork = true) {
     null,
     2,
   );
+  // Only explicit status stages can be active. Guardrails have no structured
+  // live stage telemetry, so they remain Unknown instead of simulating work.
+  const running = st?.state === "running" && !connection;
+  const curFacts = running ? deskFacts(currentRows()) : new Map();
   for (const [id, item] of stations) {
     if (id === "queue") continue;
-    item.section.classList.toggle("active", id === active);
+    const isWorking = id === active;
+    const finishedStage = isWorking && curFacts.get(id)?.doneSeen;
+    item.section.classList.toggle("active", running && isWorking && !finishedStage);
     const result = done.get(id);
     const completedCurrent =
       result &&
@@ -747,24 +803,67 @@ function renderState(s, fromNetwork = true) {
       (!Number.isFinite(Date.parse(result.ts)) ||
         !Number.isFinite(Date.parse(st?.updatedAt)) ||
         Date.parse(result.ts) >= Date.parse(st.updatedAt));
-    if (id === active && stopped) setBadge(item, `Last reported: ${st.stage}`);
-    else if (id === active && !completedCurrent)
-      setBadge(item, "Working", "working");
+    if (isWorking && stopped)
+      setBadge(item, `Last reported: ${st.stage}`);
+    else if (result && (completedCurrent || finishedStage))
+      setBadge(item, result.text, result.tone);
+    else if (id === active) setBadge(item, "Working", "working");
     else if (result) setBadge(item, result.text, result.tone);
     else
       setBadge(
         item,
-        id === "checks"
-          ? "Checks · Unknown"
-          : item.reviewer
-            ? "Unknown · Verdict unknown"
-            : "Unknown",
+        ["checks", "scope", "sensitive", "diff"].includes(id)
+          ? `${item.section.getAttribute("aria-label")} · Unknown`
+          : "Unknown",
       );
   }
+  for (const [id, item] of stations) {
+    const f = curFacts.get(id);
+    item.section.classList.toggle("long-badge", item.result.startsWith("Last reported"));
+    item.facts.hidden = !f;
+    if (!f) continue;
+    // Separate parts: only the rejection count carries the danger color, and
+    // narrow desktop desks can show a shorter form (see style.css).
+    const parts = [
+      el("span", `✓ ${f.allowed}`, "facts-actions"),
+      el("span", " · ", "facts-actions"),
+      el("span", `× ${f.rejected}`, `facts-actions${f.rejected ? " facts-rejected" : ""}`),
+    ];
+    if (f.billable !== null)
+      parts.push(el("span", " · ", "facts-actions"), el("span", `${compact(f.billable)} tokens`, "facts-tokens"));
+    item.facts.replaceChildren(...parts);
+    item.facts.setAttribute(
+      "aria-label",
+      `${f.allowed} actions allowed, ${f.rejected} rejected${f.billable !== null ? `, ${f.billable.toLocaleString("en")} billable tokens` : ""}`,
+    );
+    item.facts.className = `facts${f.billable !== null ? " has-tokens" : ""}`;
+  }
+  const [stateIcon, stateText, stateTone] = officeState(s, st, info, curFacts, connection, stopped, sameRunTerminal);
+  $("office-state").textContent = `${stateIcon} ${stateText}`;
+  $("office-state").className = `badge ${stateTone}`;
+  const canInspect = running && stations.has(active);
+  $("inspect-current").hidden = !canInspect;
+  if (canInspect)
+    $("inspect-current").textContent = `Inspect ${roleOf[active]}`;
+  const tag = $("worker-tag");
+  // At an outcome shelf the strip states the result; no stale role label.
+  const atShelf = active.startsWith("outcome:");
+  tag.hidden = !(running && hasCard && info) || atShelf;
+  tag.textContent =
+    running && hasCard && info
+      ? `${curFacts.get(info[0])?.doneSeen ? "Last reported" : roleOf[info[0]]} · ${st.card}`
+      : "";
+  const outcomesKnown = Array.isArray(s.todayOutcomes);
+  for (const shelf of shelves.values())
+    shelf.subtitle.textContent = outcomesKnown
+      ? `Today, from run logs${s.outcomesError ? ` · ${s.outcomesError}` : ""}`
+      : "This session";
   $("activity-status").hidden = !!s.logAvailable && events.size > 0;
   $("activity-status").textContent = s.logAvailable
     ? "No events recorded."
-    : "Activity unavailable";
+    : s.lastRun && (s.lastEvents || []).length
+      ? `Last run · ${s.lastRun.card} · ${s.lastRun.run} · finished run history, not live`
+      : s.lastRunError || "Activity unavailable";
   $("boards").textContent = s.boards?.length
     ? `Configured boards: ${s.boards.join(", ")} (configuration source; queue unavailable)`
     : "Configured boards unavailable";
@@ -787,8 +886,8 @@ function renderState(s, fromNetwork = true) {
     "preflight",
     "implement",
     "checks",
-    "acceptance",
-    "tests",
+    "scope",
+    "sensitive",
     "diff",
     "publish",
   ];
@@ -854,7 +953,7 @@ function enrich(row) {
     const target = stageInfo({ stage: n.stage })?.[0];
     if (target)
       done.set(target, {
-        text: stations.get(target).reviewer ? "Done · Verdict unknown" : "Done",
+        text: "Done",
         tone: "",
         stage: n.stage,
         ts: n.ts,
@@ -927,6 +1026,163 @@ function eventMessage(n) {
       return ["?", "Unrecognized event", ""];
   }
 }
+// One line that says what the office is doing, by precedence. Every branch
+// comes from status.json, STOP, or attributable run-log records.
+function officeState(s, st, info, curFacts, connection, stopped, sameRunTerminal) {
+  if (connection) return ["?", connection, "warning"];
+  if (stopped)
+    return [
+      "Ⅱ",
+      `Stopped · STOP set${st?.state === "running" ? " · execution still reported running" : ""}`,
+      "danger",
+    ];
+  if (st?.state === "running") {
+    if (errorEvent)
+      return ["×", `Error reported · during ${st.stage || "unknown stage"}`, "danger"];
+    if (sameRunTerminal)
+      return {
+        "ready-for-review": ["✓", `Ready for review · ${st.card || "card unavailable"}`, "success"],
+        "needs-clarification": ["?", `Questions asked · ${st.card || "card unavailable"}`, "warning"],
+        blocked: ["Ⅱ", `On hold · ${st.card || "card unavailable"}`, "warning"],
+      }[terminal.kind];
+    const freshness = fresh(st);
+    if (!freshness.ok)
+      return ["–", `${freshness.text} · last reported ${st.stage || "stage unavailable"}`, "warning"];
+    if (!info) return ["?", "Running · Stage unavailable", ""];
+    const f = curFacts.get(info[0]);
+    if (f && f.doneSeen)
+      return ["–", `Between reported stages · ${st.stage} finished, next step not logged`, ""];
+    return ["●", `Working · ${info[1]} · ${roleOf[info[0]]}`, "working"];
+  }
+  if (st?.state === "idle") {
+    const lastEnd = lastRows().filter((r) => r.native.kind === "end").pop();
+    const kind = lastEnd?.native.data?.kind;
+    const label = {
+      "ready-for-review": ["Draft PR ready", "success"],
+      "needs-clarification": ["Questions asked", "warning"],
+      blocked: ["On hold", "warning"],
+    }[kind];
+    if (label && snapshot?.lastRun)
+      return ["–", `Idle · last run ${snapshot.lastRun.card}: ${label[0]}`, label[1]];
+    return ["–", "Idle", ""];
+  }
+  return ["?", st ? "Status unavailable" : "Waiting for status", "warning"];
+}
+// Real `end` records from today's run logs, deduplicated with live events.
+function addOutcome(o) {
+  const shelf = shelves.get(o?.kind);
+  if (!shelf || typeof o.card !== "string" || typeof o.run !== "string") return;
+  const key = `${o.run}:${o.card}`;
+  if (shelf.items.has(key)) return;
+  const rounds = validNumber(o.rounds) ? ` · ${o.rounds} coding round${o.rounds === 1 ? "" : "s"}` : "";
+  shelf.items.set(key, {
+    key,
+    card: o.card,
+    title: "",
+    pr: typeof o.pr === "string" ? o.pr : "",
+    reason: `${textOr(o.summary, "Summary unavailable")}${rounds}${o.ts ? ` · ${o.ts}` : ""}`,
+  });
+  renderShelf(shelf);
+}
+let inspectorReturn = null;
+const dlRow = (dl, label, value) => {
+  dl.append(el("dt", label), el("dd", value));
+};
+function openInspector(id, trigger) {
+  const item = stations.get(id);
+  if (!item) return;
+  inspectorReturn = trigger || null;
+  const running = lastStatus?.state === "running";
+  const cur = running ? deskFacts(currentRows()) : new Map();
+  const last = !running ? deskFacts(lastRows()) : new Map();
+  const f = cur.get(id) || last.get(id) || null;
+  const scope = cur.get(id)
+    ? `Current run · ${lastStatus.card || "card unavailable"}`
+    : last.get(id)
+      ? `Last run · ${snapshot.lastRun.card} · finished history, not live`
+      : running
+        ? `Current run · ${lastStatus.card || "card unavailable"} · no log records for this desk yet`
+        : "No run data for this desk";
+  const name = item.section.getAttribute("aria-label");
+  $("inspector-heading").textContent = `${name} · ${roleOf[id]}`;
+  const body = $("inspector-body");
+  body.replaceChildren();
+  const dl = el("dl", null, "inspector-facts");
+  dlRow(dl, "Desk status", item.result);
+  dlRow(dl, "Scope", scope);
+  dlRow(
+    dl,
+    "Handled by",
+    id === "queue"
+      ? "Not a worker desk"
+      : `${roleOf[id]} · ${modelRole.has(id) ? "separate AI agent session" : "engine step, no model"}`,
+  );
+  if (f) {
+    dlRow(dl, "Session", f.session || "Unavailable · no stage event for this desk in this run");
+    dlRow(dl, "Started", f.started || "Unavailable");
+    dlRow(
+      dl,
+      "Finished",
+      f.doneSeen ? f.done || "Finished · time unavailable" : "Not finished · no stage-done event yet",
+    );
+    dlRow(
+      dl,
+      "Billable tokens",
+      f.billable !== null
+        ? f.billable.toLocaleString("en")
+        : f.doneSeen
+          ? "Unavailable · stage-done carried no billable count"
+          : "Unavailable · reported when the stage finishes",
+    );
+    dlRow(dl, "Actions", `${f.allowed} allowed · ${f.rejected} rejected`);
+  }
+  body.append(dl);
+  if (telemetryGap[id]) body.append(el("p", telemetryGap[id], "meta"));
+  if (f && f.perms.length) {
+    body.append(el("h3", `Recent actions (last ${f.perms.length})`));
+    const list = el("ol", null, "inspector-actions");
+    for (const p of [...f.perms].reverse()) {
+      const li = el("li");
+      const mark = p.allow === true ? "✓ Allowed" : p.allow === false ? "× Rejected" : "? Unknown";
+      li.append(
+        el("span", `${mark}: ${p.action}`, `event-${p.allow === true ? "success" : p.allow === false ? "danger" : "muted"}`),
+      );
+      if (p.reason) li.append(el("p", p.reason, "meta"));
+      if (p.ts) {
+        const t = el("time", p.ts);
+        t.dateTime = p.ts;
+        li.append(t);
+      }
+      list.append(li);
+    }
+    body.append(list);
+  }
+  if (f && f.summary) {
+    const d = el("details");
+    d.append(el("summary", "Agent's own summary · not verified"), el("pre", f.summary));
+    body.append(d);
+  }
+  $("inspector").showModal();
+  $("inspector-close").focus();
+}
+$("inspector-close").addEventListener("click", () => $("inspector").close());
+$("inspector").addEventListener("close", () => inspectorReturn?.focus());
+$("inspector").addEventListener("keydown", (e) => {
+  if (e.key !== "Tab") return;
+  const focusable = [...$("inspector").querySelectorAll("button, summary, a[href]")];
+  const first = focusable[0],
+    lastEl = focusable[focusable.length - 1];
+  if (e.shiftKey && document.activeElement === first) {
+    e.preventDefault();
+    lastEl.focus();
+  } else if (!e.shiftKey && document.activeElement === lastEl) {
+    e.preventDefault();
+    first.focus();
+  }
+});
+$("inspect-current").addEventListener("click", () =>
+  openInspector(active, $("inspect-current")),
+);
 function addEvent(row, history = false) {
   if (!row || typeof row.id !== "string" || !row.native || events.has(row.id))
     return;
@@ -936,7 +1192,7 @@ function addEvent(row, history = false) {
   events.set(row.id, row);
   const file = row.id.split(":")[0];
   if (!fileOrder.has(file)) fileOrder.set(file, fileOrder.size);
-  if (context && n.kind === "end" && shelves.has(n.data?.kind)) {
+  if (context && !row.lastRun && n.kind === "end" && shelves.has(n.data?.kind)) {
     const kind = n.data.kind,
       shelf = shelves.get(kind),
       key = `${context.run}:${context.card}`;
