@@ -33,6 +33,10 @@ type Profile struct {
 	// profile may change. It comes from config, not from the agent's pre-flight,
 	// so an agent cannot widen its own scope. Empty means no profile-level limit.
 	AllowedPaths []string `json:"allowed_paths,omitempty"`
+	// AllowLockfileGeneration lets this profile's runner-owned check generate
+	// package-lock.json from the card's package.json (see npmlock.go). It is
+	// opt-in per profile, and the profile must own exactly the files involved.
+	AllowLockfileGeneration bool `json:"allow_lockfile_generation,omitempty"`
 }
 
 // Owns reports the changed files that fall outside the profile's AllowedPaths.
@@ -239,7 +243,11 @@ func inlineCodeFlag(base string, args []string) string {
 // ValidateCheck refuses a check that could run arbitrary code or that
 // weakens a hard rule. Argv is always executed directly (no shell), so this is
 // a second layer, not the only one.
-func ValidateCheck(ch Check) error {
+func ValidateCheck(ch Check) error { return validateCheck(ch, false) }
+
+// validateCheck is ValidateCheck, with the one profile-scoped exception: the
+// exact lockfile-generation argv is accepted only when allowLockGen is true.
+func validateCheck(ch Check, allowLockGen bool) error {
 	if strings.TrimSpace(ch.Name) == "" {
 		return errors.New("check has no name")
 	}
@@ -281,9 +289,18 @@ func ValidateCheck(ch Check) error {
 			return fmt.Errorf("check %q: %s is not a valid regular expression: %w", ch.Name, label, err)
 		}
 	}
+	if _, gen := LockGenNPM(ch.Argv); gen {
+		if !allowLockGen {
+			return fmt.Errorf("check %q generates a lockfile; that is allowed only in a profile with allow_lockfile_generation", ch.Name)
+		}
+		if !ch.Network {
+			return fmt.Errorf("check %q generates a lockfile and needs network:true (it reads package metadata from the pinned registry)", ch.Name)
+		}
+		return nil
+	}
 	if ch.Network {
 		if _, ok := LockedNPMInstall(ch.Argv); !ok {
-			return fmt.Errorf("check %q requests network access; only the exact argv `npm [--prefix <dir>] ci --ignore-scripts` may", ch.Name)
+			return fmt.Errorf("check %q requests network access; only the exact argvs `npm [--prefix <dir>] ci --ignore-scripts` and, in a profile with allow_lockfile_generation, `npm [--prefix <dir>] install --package-lock-only --ignore-scripts` may", ch.Name)
 		}
 	}
 	return nil
@@ -334,16 +351,8 @@ func PreflightNetworkInstall(worktree string, argv []string) error {
 	if err != nil {
 		return fmt.Errorf("install directory: %w", err)
 	}
-	root, err := filepath.EvalSymlinks(worktree)
-	if err != nil {
+	if err := refuseNPMConfigFiles(worktree, dir); err != nil {
 		return err
-	}
-	for _, d := range []string{root, dir} {
-		for _, name := range []string{".npmrc", ".yarnrc", ".yarnrc.yml", ".pnpmrc"} {
-			if _, err := os.Lstat(filepath.Join(d, name)); err == nil {
-				return fmt.Errorf("%s exists in the worktree; npm configuration there could redirect the registry", name)
-			}
-		}
 	}
 	lock, err := realInside(worktree, filepath.Join(dir, "package-lock.json"))
 	if err != nil {
@@ -353,48 +362,7 @@ func PreflightNetworkInstall(worktree string, argv []string) error {
 	if err != nil {
 		return fmt.Errorf("package-lock.json is unreadable: %w", err)
 	}
-	var doc struct {
-		LockfileVersion int `json:"lockfileVersion"`
-		Packages        map[string]struct {
-			Resolved  string `json:"resolved"`
-			Integrity string `json:"integrity"`
-			Link      bool   `json:"link"`
-			InBundle  bool   `json:"inBundle"`
-		} `json:"packages"`
-	}
-	if err := json.Unmarshal(data, &doc); err != nil {
-		return fmt.Errorf("package-lock.json is not valid JSON: %w", err)
-	}
-	if (doc.LockfileVersion != 2 && doc.LockfileVersion != 3) || len(doc.Packages) == 0 {
-		return errors.New("package-lock.json needs lockfileVersion 2 or 3 with a packages map")
-	}
-	valid := func(resolved, integrity string) bool {
-		return strings.HasPrefix(resolved, lockHostAllowed) && (strings.HasPrefix(integrity, "sha512-") || strings.HasPrefix(integrity, "sha384-"))
-	}
-	for name, pkg := range doc.Packages {
-		if name == "" {
-			continue
-		}
-		if pkg.Link {
-			return fmt.Errorf("lockfile entry %q is a link; linked packages are not allowed", name)
-		}
-		if pkg.Resolved == "" && pkg.InBundle {
-			// A bundled dependency ships inside its parent's tarball and has no
-			// URL of its own. Accept it only when an ancestor entry that is
-			// itself fetched (or bundled) from the pinned registry carries it.
-			if err := bundledUnderValidParent(doc.Packages, name, valid); err != nil {
-				return fmt.Errorf("lockfile entry %q: %w", name, err)
-			}
-			continue
-		}
-		if !strings.HasPrefix(pkg.Resolved, lockHostAllowed) {
-			return fmt.Errorf("lockfile entry %q resolves from %q, not %s", name, clipLock(pkg.Resolved), lockHostAllowed)
-		}
-		if !valid(pkg.Resolved, pkg.Integrity) {
-			return fmt.Errorf("lockfile entry %q has no sha512/sha384 integrity", name)
-		}
-	}
-	return nil
+	return checkLockfileJSON(data)
 }
 
 func bundledUnderValidParent(pkgs map[string]struct {
@@ -484,9 +452,12 @@ func validateProfiles(b BoardConfig) error {
 			prefixes = append(prefixes, struct{ profile, value string }{p.Name, v})
 		}
 		for _, ch := range p.Checks {
-			if err := ValidateCheck(ch); err != nil {
+			if err := validateCheck(ch, p.AllowLockfileGeneration); err != nil {
 				return fmt.Errorf("config: profile %q: %w", p.Name, err)
 			}
+		}
+		if err := validateLockGenProfile(p); err != nil {
+			return err
 		}
 		for _, rel := range p.RequireFiles {
 			if _, err := inside("/", rel); err != nil {

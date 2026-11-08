@@ -30,6 +30,46 @@ type CmdChecker struct {
 	// Owns runs before any check and fails the run when the worktree holds a
 	// change outside the profile's allowed paths.
 	Owns func(ctx context.Context) error
+	// AllowLockGen enables the runner-owned lockfile-generation step for this
+	// run (the profile's allow_lockfile_generation). Without it that argv is
+	// refused even if a config somehow listed it.
+	AllowLockGen bool
+	// Before is the instant lockfile generation resolves versions as of
+	// (npm --before). The engine passes the run's start time, so every fix
+	// round of one run resolves the same registry state.
+	Before time.Time
+}
+
+// execCmd runs one command through the sandbox (or directly, for tests) and
+// returns its combined output. setupErr is a sandbox problem (an
+// infrastructure error); runErr is the command's own failure.
+func (c CmdChecker) execCmd(ctx context.Context, argv []string, network bool, before string, to time.Duration) (out string, runErr error, setupErr error) {
+	run := argv
+	if !c.Unsandboxed {
+		if c.Sandbox == nil {
+			return "", nil, ErrNoSandbox
+		}
+		sb := *c.Sandbox
+		sb.Network = network
+		sb.NPMBefore = before
+		wrapped, err := sb.Wrap(argv)
+		if err != nil {
+			return "", nil, err
+		}
+		run = wrapped
+	}
+	cctx, cancel := context.WithTimeout(ctx, to)
+	defer cancel()
+	cmd := exec.CommandContext(cctx, run[0], run[1:]...)
+	cmd.Dir = c.Dir
+	cmd.Env = minimalEnv(c.Dir)
+	if before != "" {
+		cmd.Env = append(cmd.Env, "npm_config_before="+before)
+	}
+	var buf bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &buf, &buf
+	err := cmd.Run()
+	return buf.String(), err, nil
 }
 
 // minimalEnv is all a check gets from the member's environment. HOME is the
@@ -70,41 +110,35 @@ func (c CmdChecker) Run(ctx context.Context) ([]pipeline.CheckResult, error) {
 		if len(ch.Argv) == 0 {
 			continue
 		}
-		argv := ch.Argv
-		if !c.Unsandboxed {
-			if c.Sandbox == nil {
-				return out, ErrNoSandbox
-			}
-			if ch.Network {
-				if err := PreflightNetworkInstall(c.Dir, ch.Argv); err != nil {
-					out = append(out, pipeline.CheckResult{Name: ch.Name, Cmd: strings.Join(ch.Argv, " "), ExitCode: -1, Passed: false,
-						Output: "network install refused before running: " + err.Error()})
-					continue
-				}
-			}
-			sb := *c.Sandbox
-			sb.Network = ch.Network
-			wrapped, err := sb.Wrap(ch.Argv)
+		if _, gen := LockGenNPM(ch.Argv); gen {
+			r, err := c.runLockGeneration(ctx, ch, to)
 			if err != nil {
 				return out, err
 			}
-			argv = wrapped
+			out = append(out, r)
+			continue
 		}
-		cctx, cancel := context.WithTimeout(ctx, to)
-		cmd := exec.CommandContext(cctx, argv[0], argv[1:]...)
-		cmd.Dir = c.Dir
-		cmd.Env = minimalEnv(c.Dir)
-		var buf bytes.Buffer
-		cmd.Stdout, cmd.Stderr = &buf, &buf
-		err := cmd.Run()
-		cancel()
+		if !c.Unsandboxed && c.Sandbox == nil {
+			return out, ErrNoSandbox
+		}
+		if ch.Network {
+			if err := PreflightNetworkInstall(c.Dir, ch.Argv); err != nil {
+				out = append(out, pipeline.CheckResult{Name: ch.Name, Cmd: strings.Join(ch.Argv, " "), ExitCode: -1, Passed: false,
+					Output: "network install refused before running: " + err.Error()})
+				continue
+			}
+		}
+		raw, err, setupErr := c.execCmd(ctx, ch.Argv, ch.Network, "", to)
+		if setupErr != nil {
+			return out, setupErr
+		}
 		if ctx.Err() != nil {
 			return out, ctx.Err()
 		}
 		// Test runners colour their summaries even when CI=1 (Vitest does), and
 		// an escape code in front of "Tests" defeats every anchored pattern.
 		// Match and report on the plain text.
-		clean := stripANSI(buf.String())
+		clean := stripANSI(raw)
 		r := pipeline.CheckResult{Name: ch.Name, Cmd: strings.Join(ch.Argv, " "), Output: tailBytes([]byte(clean), 8000), Passed: err == nil}
 		var ee *exec.ExitError
 		switch {

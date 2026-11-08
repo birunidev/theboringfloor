@@ -22,8 +22,9 @@ type Check struct {
 	// noted in the evidence (e.g. pytest 5 = "no tests collected").
 	AllowExit []int `json:"allow_exit,omitempty"`
 	// Network lets this one check reach the network (sandbox shares the host
-	// network namespace). Only `npm ci --ignore-scripts` is accepted; see
-	// ValidateCheck.
+	// network namespace). Only `npm ci --ignore-scripts` is accepted and, in a
+	// profile with allow_lockfile_generation, the exact lockfile-generation
+	// argv; see ValidateCheck and npmlock.go.
 	Network bool `json:"network,omitempty"`
 	// RequireOutput is a regular expression the combined output must match,
 	// and RejectOutput one it must not. They let a profile insist on evidence a

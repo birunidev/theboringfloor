@@ -162,7 +162,13 @@ func cardContext(c board.Card, r Resolved) pipeline.CardContext {
 		checks = prof.Checks
 	}
 	for _, ch := range checks {
-		cc.Checks = append(cc.Checks, strings.Join(ch.Argv, " "))
+		line := strings.Join(ch.Argv, " ")
+		if _, gen := LockGenNPM(ch.Argv); gen {
+			// Tell the agent who owns this step, so it neither tries to run npm
+			// (it has no network and no npm) nor hand-writes a lockfile.
+			line += "   (run by the autopilot, not by you: it generates package-lock.json from your package.json; do not write or edit package-lock.json)"
+		}
+		cc.Checks = append(cc.Checks, line)
 	}
 	return cc
 }
@@ -438,7 +444,8 @@ func (e *Engine) runCard(ctx context.Context, r Resolved, summary board.Card, la
 	if err != nil {
 		return fmt.Errorf("card %s: check profile: %w", c.Ref(), err)
 	}
-	runID := runstate.NewRunID(e.now())
+	startedAt := e.now()
+	runID := runstate.NewRunID(startedAt)
 	log, err := e.Paths.OpenRunLog(c.Ref(), runID, e.Now)
 	if err != nil {
 		return err
@@ -504,7 +511,7 @@ func (e *Engine) runCard(ctx context.Context, r Resolved, summary board.Card, la
 	defer cleanup()
 	run.Base = r.BC.Base
 	run.BaseSHA = wt.BaseSHA
-	out := pipeline.Run(runCtx, cardContext(c, r), agent, WTWorkspace{WT: wt}, CmdChecker{Dir: wt.Path, Checks: prof.Checks, Require: prof.Verify, Owns: func(ctx context.Context) error {
+	out := pipeline.Run(runCtx, cardContext(c, r), agent, WTWorkspace{WT: wt}, CmdChecker{Dir: wt.Path, Checks: prof.Checks, Require: prof.Verify, AllowLockGen: prof.AllowLockfileGeneration, Before: startedAt, Owns: func(ctx context.Context) error {
 		files, err := worktree.ChangedFiles(ctx, wt)
 		if err != nil {
 			return err
