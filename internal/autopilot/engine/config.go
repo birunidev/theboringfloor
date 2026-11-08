@@ -21,6 +21,17 @@ type Check struct {
 	// AllowExit lists non-zero exit codes that still count as a pass and are
 	// noted in the evidence (e.g. pytest 5 = "no tests collected").
 	AllowExit []int `json:"allow_exit,omitempty"`
+	// Network lets this one check reach the network (sandbox shares the host
+	// network namespace). Only `npm ci --ignore-scripts` is accepted; see
+	// ValidateCheck.
+	Network bool `json:"network,omitempty"`
+	// RequireOutput is a regular expression the combined output must match,
+	// and RejectOutput one it must not. They let a profile insist on evidence a
+	// bare exit code cannot give: node:test exits 0 for an empty test file and
+	// for skipped tests, so a profile requires a minimum test count and rejects
+	// skipped or todo tests. Both are compiled at config load.
+	RequireOutput string `json:"require_output,omitempty"`
+	RejectOutput  string `json:"reject_output,omitempty"`
 }
 
 // Lane routes explicitly named card-title prefixes to one board working list.
@@ -55,6 +66,9 @@ type BoardConfig struct {
 	// Setup commands run in a fresh worktree before checks (e.g. symlink deps).
 	Setup []Check `json:"setup"`
 	Lanes []Lane  `json:"lanes,omitempty"`
+	// Profiles select checks per card by title prefix. When set, Checks must
+	// be empty and a card without exactly one matching profile is refused.
+	Profiles []Profile `json:"profiles,omitempty"`
 }
 
 // Config is ~/.theboringfloor/autopilot/config.json.
@@ -151,6 +165,22 @@ func (c Config) Validate() error {
 			if strings.EqualFold(strings.TrimSpace(l), strings.TrimSpace(b.DoneList)) {
 				return fmt.Errorf("config: board %q routes cards into its Done list %q", b.Name, l)
 			}
+		}
+		for _, ch := range b.Checks {
+			if err := ValidateCheck(ch); err != nil {
+				return fmt.Errorf("config: board %q: %w", b.Name, err)
+			}
+		}
+		for _, ch := range b.Setup {
+			if ch.Network {
+				return fmt.Errorf("config: board %q: setup %q requests network access; only an install check may", b.Name, ch.Name)
+			}
+			if err := ValidateCheck(ch); err != nil {
+				return fmt.Errorf("config: board %q setup: %w", b.Name, err)
+			}
+		}
+		if err := validateProfiles(b); err != nil {
+			return err
 		}
 		seenLane := map[string]bool{}
 		var prefixes []struct{ lane, value string }

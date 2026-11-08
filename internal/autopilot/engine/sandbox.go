@@ -18,7 +18,16 @@ type Sandbox struct {
 	Worktree string
 	ReadOnly []string // extra paths under $HOME to expose read-only (venv, deps)
 	Bwrap    string   // default: "bwrap" on PATH
+	// Network shares the host network namespace for one dependency-install
+	// check. bubblewrap cannot filter hosts, so the install is kept narrow:
+	// the validated command is `npm ci --ignore-scripts`, HOME is an empty
+	// tmpfs (no ~/.npmrc or tokens), the environment is cleared, and the
+	// registry is pinned by npm_config_registry below.
+	Network bool
 }
+
+// AllowedNPMRegistry is the only registry a networked install is pointed at.
+const AllowedNPMRegistry = "https://registry.npmjs.org/"
 
 // ErrNoSandbox: bubblewrap is unavailable; checks refuse to run unsandboxed.
 var ErrNoSandbox = errors.New("sandbox: bubblewrap (bwrap) not found; checks will not run unsandboxed")
@@ -42,13 +51,17 @@ func (s Sandbox) Wrap(argv []string) ([]string, error) {
 		return nil, err
 	}
 	out := []string{bw,
-		"--die-with-parent", "--new-session", "--unshare-net", "--unshare-pid", "--unshare-ipc",
+		"--die-with-parent", "--new-session", "--unshare-pid", "--unshare-ipc"}
+	if !s.Network {
+		out = append(out, "--unshare-net")
+	}
+	out = append(out,
 		"--ro-bind", "/", "/",
 		"--dev", "/dev",
 		"--proc", "/proc",
 		"--tmpfs", "/tmp",
 		"--tmpfs", home,
-	}
+	)
 	for _, p := range s.ReadOnly {
 		abs, err := filepath.Abs(p)
 		if err != nil {
@@ -70,6 +83,20 @@ func (s Sandbox) Wrap(argv []string) ([]string, error) {
 	// agent-written code or its output.
 	out = append(out, "--bind", wt, wt, "--chdir", wt, "--clearenv",
 		"--setenv", "PATH", path, "--setenv", "HOME", home, "--setenv", "LANG", "C.UTF-8",
-		"--setenv", "TMPDIR", "/tmp", "--setenv", "CI", "1", "--")
+		"--setenv", "TMPDIR", "/tmp", "--setenv", "CI", "1")
+	if s.Network {
+		out = append(out,
+			"--setenv", "npm_config_registry", AllowedNPMRegistry,
+			// Two different, non-existent files in the private /tmp: npm treats a
+			// missing config as empty but refuses the same path for both levels.
+			"--setenv", "npm_config_userconfig", "/tmp/npm-userconfig",
+			"--setenv", "npm_config_globalconfig", "/tmp/npm-globalconfig",
+			"--setenv", "npm_config_ignore_scripts", "true",
+			"--setenv", "npm_config_cache", "/tmp/npm-cache",
+			"--setenv", "npm_config_audit", "false",
+			"--setenv", "npm_config_fund", "false",
+			"--setenv", "npm_config_update_notifier", "false")
+	}
+	out = append(out, "--")
 	return append(out, argv...), nil
 }

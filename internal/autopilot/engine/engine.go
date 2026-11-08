@@ -157,7 +157,11 @@ func cardContext(c board.Card, r Resolved) pipeline.CardContext {
 	for _, m := range c.Comments {
 		cc.Comments = append(cc.Comments, m.Text)
 	}
-	for _, ch := range r.BC.Checks {
+	checks := r.BC.Checks
+	if prof, err := r.BC.ProfileFor(c.Title); err == nil {
+		checks = prof.Checks
+	}
+	for _, ch := range checks {
 		cc.Checks = append(cc.Checks, strings.Join(ch.Argv, " "))
 	}
 	return cc
@@ -238,7 +242,12 @@ func (e *Engine) dryRunCard(ctx context.Context, r Resolved, c board.Card) DryRu
 		return res
 	}
 	defer e.WT.Remove(context.Background(), e.repo(r.BC), wt, true)
-	agent, cleanup, err := e.NewAgent(ctx, wt.Path, c, r.BC, []string{r.Done}, log, nil)
+	prof, err := r.BC.ProfileFor(c.Title)
+	if err != nil {
+		res.Err = fmt.Errorf("check profile: %w", err)
+		return res
+	}
+	agent, cleanup, err := e.NewAgent(ctx, wt.Path, c, prof.Resolved(r.BC), []string{r.Done}, log, nil)
 	if err != nil {
 		res.Err = err
 		return res
@@ -331,6 +340,9 @@ func (e *Engine) TickParallel(ctx context.Context) error {
 			if selected[lane.Name] {
 				continue
 			}
+			if _, err := bc.ProfileFor(c.Title); err != nil {
+				return fmt.Errorf("card %s: check profile: %w", c.Ref(), err)
+			}
 			if err := e.Budget.Allow(c.Ref()); err != nil {
 				e.printf("skip %s: %v\n", c.Ref(), err)
 				continue
@@ -385,6 +397,10 @@ func (e *Engine) Tick(ctx context.Context) error {
 			continue
 		}
 		for _, c := range cands {
+			if _, err := bc.ProfileFor(c.Title); err != nil {
+				e.printf("skip %s: check profile: %v\n", c.Ref(), err)
+				continue
+			}
 			if err := e.Budget.Allow(c.Ref()); err != nil {
 				e.printf("skip %s: %v\n", c.Ref(), err)
 				continue
@@ -408,6 +424,19 @@ func (e *Engine) runCard(ctx context.Context, r Resolved, summary board.Card, la
 	}
 	if c.ListID != r.Ready {
 		return fmt.Errorf("card %s left the ready list before claim", c.Ref())
+	}
+	// Fail closed at the claim boundary, not only in Tick/TickParallel: RunCard
+	// is public, and STOP and the budgets must hold for a direct call too.
+	if err := e.Paths.CheckStop(); err != nil {
+		return err
+	}
+	if err := e.Budget.Allow(c.Ref()); err != nil {
+		return fmt.Errorf("card %s: %w", c.Ref(), err)
+	}
+	// Refuse before any board write: no claim comment, no move, no worktree.
+	prof, err := r.BC.ProfileFor(c.Title)
+	if err != nil {
+		return fmt.Errorf("card %s: check profile: %w", c.Ref(), err)
 	}
 	runID := runstate.NewRunID(e.now())
 	log, err := e.Paths.OpenRunLog(c.Ref(), runID, e.Now)
@@ -454,9 +483,11 @@ func (e *Engine) runCard(ctx context.Context, r Resolved, summary board.Card, la
 	run := handoff.Run{ID: runID, CardKey: c.Ref(), Title: c.Title, Repo: r.BC.RepoName, Branch: wt.Branch, LogPath: log.Path(), When: e.now()}
 	if len(r.BC.Setup) > 0 {
 		setStage("setup")
-		// Setup commands come from the member's config and run before any
-		// agent-written code exists in the worktree.
-		res, err := CmdChecker{Dir: wt.Path, Checks: r.BC.Setup, Unsandboxed: true}.Run(runCtx)
+		// Setup commands come from the member's config. They run in the same
+		// bubblewrap sandbox as the checks (read-only root, empty $HOME, no
+		// network, cleared environment), never on the host: a setup command
+		// has no more access to the member's files than the code it prepares.
+		res, err := CmdChecker{Dir: wt.Path, Checks: r.BC.Setup, Sandbox: &Sandbox{Worktree: wt.Path, ReadOnly: prof.SandboxReadOnly}}.Run(runCtx)
 		for _, s := range res {
 			if !s.Passed && err == nil {
 				err = fmt.Errorf("setup %q failed (exit %d)", s.Name, s.ExitCode)
@@ -466,14 +497,20 @@ func (e *Engine) runCard(ctx context.Context, r Resolved, summary board.Card, la
 			return e.finish(ctx, g, r, c, log, &status, run, pipeline.Outcome{Kind: pipeline.Blocked, Summary: "worktree setup failed", Err: err}, idem)
 		}
 	}
-	agent, cleanup, err := e.NewAgent(runCtx, wt.Path, c, r.BC, []string{r.Done}, log, setStage)
+	agent, cleanup, err := e.NewAgent(runCtx, wt.Path, c, prof.Resolved(r.BC), []string{r.Done}, log, setStage)
 	if err != nil {
 		return e.finish(ctx, g, r, c, log, &status, run, pipeline.Outcome{Kind: pipeline.Blocked, Summary: "could not start opencode", Err: err}, idem)
 	}
 	defer cleanup()
 	run.Base = r.BC.Base
 	run.BaseSHA = wt.BaseSHA
-	out := pipeline.Run(runCtx, cardContext(c, r), agent, WTWorkspace{WT: wt}, CmdChecker{Dir: wt.Path, Checks: r.BC.Checks, Sandbox: &Sandbox{Worktree: wt.Path, ReadOnly: r.BC.SandboxReadOnly}}, pipeline.Config{MaxRounds: e.Cfg.MaxRounds})
+	out := pipeline.Run(runCtx, cardContext(c, r), agent, WTWorkspace{WT: wt}, CmdChecker{Dir: wt.Path, Checks: prof.Checks, Require: prof.Verify, Owns: func(ctx context.Context) error {
+		files, err := worktree.ChangedFiles(ctx, wt)
+		if err != nil {
+			return err
+		}
+		return prof.Owns(files)
+	}, Sandbox: &Sandbox{Worktree: wt.Path, ReadOnly: prof.SandboxReadOnly}}, pipeline.Config{MaxRounds: e.Cfg.MaxRounds})
 	if out.Kind == pipeline.ReadyForReview {
 		setStage("publish")
 		url, head, err := e.Pub.Publish(runCtx, wt.Path, wt.Branch, r.BC.Base, handoff.CommitMessage(run, out), handoff.PRTitle(run), handoff.PRBody(run, out))

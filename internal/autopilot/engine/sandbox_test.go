@@ -123,21 +123,24 @@ func TestSandboxClearsEnvironment(t *testing.T) {
 	}
 }
 
-func TestAllowExitIsNotedAsPass(t *testing.T) {
+// A required gate passes on exit 0 only. allow_exit is refused at config load
+// (see TestProfileConfigRefusals) and ignored here, so even a stale config that
+// still carries it cannot turn a failing exit into a pass.
+func TestAllowExitCanNoLongerTurnAFailureIntoAPass(t *testing.T) {
 	needBwrap(t)
 	_, wt, _ := homeDirs(t)
 	sb := Sandbox{Worktree: wt}
 	res, err := CmdChecker{Dir: wt, Sandbox: &sb, Checks: []Check{
 		{Name: "no tests", Argv: []string{"sh", "-c", "exit 5"}, AllowExit: []int{5}},
-		{Name: "real fail", Argv: []string{"sh", "-c", "exit 1"}, AllowExit: []int{5}},
+		{Name: "real fail", Argv: []string{"sh", "-c", "exit 1"}, AllowExit: []int{1, 5}},
+		{Name: "typecheck fail", Argv: []string{"sh", "-c", "exit 2"}, AllowExit: []int{2}},
 	}}.Run(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !res[0].Passed || res[0].ExitCode != 5 || res[0].Note != "exit 5 accepted (configured)" {
-		t.Fatalf("allowed exit: %+v", res[0])
-	}
-	if res[1].Passed {
-		t.Fatalf("non-allowed exit passed: %+v", res[1])
+	for _, r := range res {
+		if r.Passed {
+			t.Fatalf("an allow_exit configuration turned exit %d into a pass: %+v", r.ExitCode, r)
+		}
 	}
 }
