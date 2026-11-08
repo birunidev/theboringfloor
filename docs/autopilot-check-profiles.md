@@ -79,11 +79,16 @@ never taken from card text and never chosen by a model.
     root or the project directory (they could redirect a scoped registry or
     re-enable scripts, which an environment variable cannot override);
   - the project directory and `package-lock.json` resolve inside the worktree;
-  - the lockfile is version 2 or 3, has no `link` entries, and every package
+  - the lockfile is exactly version 2 or 3 (any other version, including a
+    future 4, is refused until it has been evaluated), has no `link` entries,
+    and every package
     resolves from `https://registry.npmjs.org/` and carries a sha512/sha384
     integrity hash.
   The sandbox also sets `npm_config_registry`, `ignore_scripts`, a private
-  cache, and `userconfig`/`globalconfig` to `/dev/null`, with `$HOME` empty.
+  cache, and `userconfig`/`globalconfig` to two different files that do not
+  exist in the sandbox's private `/tmp` (`/tmp/npm-userconfig`,
+  `/tmp/npm-globalconfig`; npm treats a missing config as empty but refuses the
+  same path for both levels, so `/dev/null` cannot be used), with `$HOME` empty.
 - **This is not an egress firewall.** bubblewrap cannot filter hosts, so the
   network is open for the duration of that one command. The protection is on
   what npm is told to fetch (the lockfile and argv above), not on where packets

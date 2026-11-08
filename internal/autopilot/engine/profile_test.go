@@ -380,6 +380,10 @@ func TestNetworkInstallIsRefusedForLockfilesThatLeaveTheRegistry(t *testing.T) {
 	if err := PreflightNetworkInstall(installTree(t, lockfile(goodEntry)), installArgv); err != nil {
 		t.Fatalf("a clean lockfile was refused: %v", err)
 	}
+	v2 := strings.Replace(lockfile(goodEntry), `"lockfileVersion":3`, `"lockfileVersion":2`, 1)
+	if err := PreflightNetworkInstall(installTree(t, v2), installArgv); err != nil {
+		t.Fatalf("a clean lockfileVersion 2 was refused: %v", err)
+	}
 	// Real lockfiles carry bundled dependencies without a URL of their own.
 	bundled := goodEntry +
 		`,"node_modules/p":{"resolved":"https://registry.npmjs.org/p/-/p-1.tgz","integrity":"sha512-A"}` +
@@ -404,6 +408,8 @@ func TestNetworkInstallIsRefusedForLockfilesThatLeaveTheRegistry(t *testing.T) {
 		"linked package":                            lockfile(`,"node_modules/x":{"resolved":"../x","link":true}`),
 		"lockfile v1":                               `{"lockfileVersion":1,"dependencies":{}}`,
 		"empty packages":                            `{"lockfileVersion":3,"packages":{}}`,
+		"lockfile v4 (future, not evaluated)":       `{"lockfileVersion":4,"packages":{"":{},"node_modules/zod":{"resolved":"https://registry.npmjs.org/zod/-/zod-4.6.7.tgz","integrity":"sha512-AAAA"}}}`,
+		"lockfile v0":                               `{"lockfileVersion":0,"packages":{"":{}}}`,
 		"not json":                                  `lockfile`,
 	}
 	for name, body := range cases {
@@ -528,6 +534,9 @@ func TestSandboxNetworkIsOffUnlessTheInstallCheckAsksForIt(t *testing.T) {
 	}
 	if !contains(on, "--tmpfs") {
 		t.Fatal("home is not hidden")
+	}
+	if !contains(on, "/tmp/npm-userconfig") || !contains(on, "/tmp/npm-globalconfig") || contains(on, "/dev/null") {
+		t.Fatalf("npm user/global config must be two distinct missing files, not /dev/null: %v", on)
 	}
 }
 

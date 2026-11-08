@@ -334,7 +334,7 @@ func PreflightNetworkInstall(worktree string, argv []string) error {
 	if err := json.Unmarshal(data, &doc); err != nil {
 		return fmt.Errorf("package-lock.json is not valid JSON: %w", err)
 	}
-	if doc.LockfileVersion < 2 || len(doc.Packages) == 0 {
+	if (doc.LockfileVersion != 2 && doc.LockfileVersion != 3) || len(doc.Packages) == 0 {
 		return errors.New("package-lock.json needs lockfileVersion 2 or 3 with a packages map")
 	}
 	valid := func(resolved, integrity string) bool {
