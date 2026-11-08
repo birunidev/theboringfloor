@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"regexp"
 	"strings"
 	"time"
 
@@ -23,7 +24,24 @@ type CmdChecker struct {
 	Timeout     time.Duration // per command, default 15m
 	Sandbox     *Sandbox
 	Unsandboxed bool
+	// Require runs before any check (profile preconditions). Its error is a
+	// failed check, never an infrastructure error and never a silent pass.
+	Require func(dir string) error
 }
+
+// minimalEnv is all a check or setup command gets from the member's
+// environment. Tokens and keys never reach the command or its output.
+func minimalEnv() []string {
+	path := os.Getenv("PATH")
+	if path == "" {
+		path = "/usr/local/bin:/usr/bin:/bin"
+	}
+	return []string{"PATH=" + path, "HOME=" + os.Getenv("HOME"), "LANG=C.UTF-8", "CI=1"}
+}
+
+// zeroTestMarkers are runner outputs that mean "nothing was tested", which
+// never counts as a pass even when the runner exits 0.
+var zeroTestMarkers = regexp.MustCompile(`(?mi)(^collected 0 items|\bno tests ran\b|no test files found|^# tests 0\s*$|\bno tests found\b|0 tests? collected|^\d+ skipped in [\d.]+s|all tests were skipped)`)
 
 // Run implements pipeline.Checker. A command that cannot start counts as a
 // failed check, not an infrastructure error.
@@ -33,6 +51,11 @@ func (c CmdChecker) Run(ctx context.Context) ([]pipeline.CheckResult, error) {
 		to = 15 * time.Minute
 	}
 	var out []pipeline.CheckResult
+	if c.Require != nil {
+		if err := c.Require(c.Dir); err != nil {
+			return []pipeline.CheckResult{{Name: "profile preconditions", Cmd: "verify profile requirements", ExitCode: -1, Passed: false, Output: err.Error()}}, nil
+		}
+	}
 	for _, ch := range c.Checks {
 		if len(ch.Argv) == 0 {
 			continue
@@ -42,7 +65,9 @@ func (c CmdChecker) Run(ctx context.Context) ([]pipeline.CheckResult, error) {
 			if c.Sandbox == nil {
 				return out, ErrNoSandbox
 			}
-			wrapped, err := c.Sandbox.Wrap(ch.Argv)
+			sb := *c.Sandbox
+			sb.Network = ch.Network
+			wrapped, err := sb.Wrap(ch.Argv)
 			if err != nil {
 				return out, err
 			}
@@ -51,7 +76,7 @@ func (c CmdChecker) Run(ctx context.Context) ([]pipeline.CheckResult, error) {
 		cctx, cancel := context.WithTimeout(ctx, to)
 		cmd := exec.CommandContext(cctx, argv[0], argv[1:]...)
 		cmd.Dir = c.Dir
-		cmd.Env = append(os.Environ(), "CI=1")
+		cmd.Env = minimalEnv()
 		var buf bytes.Buffer
 		cmd.Stdout, cmd.Stderr = &buf, &buf
 		err := cmd.Run()
@@ -74,6 +99,12 @@ func (c CmdChecker) Run(ctx context.Context) ([]pipeline.CheckResult, error) {
 		default:
 			r.ExitCode = -1
 			r.Output = strings.TrimSpace(r.Output + "\n" + err.Error())
+		}
+		if r.Passed && isPytest(ch.Argv) && r.ExitCode == pytestNoTests {
+			r.Passed, r.Note = false, "pytest exit 5 means no tests were collected; an empty suite is a failure"
+		}
+		if r.Passed && zeroTestMarkers.MatchString(r.Output) {
+			r.Passed, r.Note = false, "the runner reported that no tests ran; an empty suite is a failure"
 		}
 		out = append(out, r)
 	}

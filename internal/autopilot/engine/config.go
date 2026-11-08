@@ -21,6 +21,10 @@ type Check struct {
 	// AllowExit lists non-zero exit codes that still count as a pass and are
 	// noted in the evidence (e.g. pytest 5 = "no tests collected").
 	AllowExit []int `json:"allow_exit,omitempty"`
+	// Network lets this one check reach the network (sandbox shares the host
+	// network namespace). Only `npm ci --ignore-scripts` is accepted; see
+	// ValidateCheck.
+	Network bool `json:"network,omitempty"`
 }
 
 // Lane routes explicitly named card-title prefixes to one board working list.
@@ -55,6 +59,9 @@ type BoardConfig struct {
 	// Setup commands run in a fresh worktree before checks (e.g. symlink deps).
 	Setup []Check `json:"setup"`
 	Lanes []Lane  `json:"lanes,omitempty"`
+	// Profiles select checks per card by title prefix. When set, Checks must
+	// be empty and a card without exactly one matching profile is refused.
+	Profiles []Profile `json:"profiles,omitempty"`
 }
 
 // Config is ~/.theboringfloor/autopilot/config.json.
@@ -151,6 +158,14 @@ func (c Config) Validate() error {
 			if strings.EqualFold(strings.TrimSpace(l), strings.TrimSpace(b.DoneList)) {
 				return fmt.Errorf("config: board %q routes cards into its Done list %q", b.Name, l)
 			}
+		}
+		for _, ch := range b.Checks {
+			if err := ValidateCheck(ch); err != nil {
+				return fmt.Errorf("config: board %q: %w", b.Name, err)
+			}
+		}
+		if err := validateProfiles(b); err != nil {
+			return err
 		}
 		seenLane := map[string]bool{}
 		var prefixes []struct{ lane, value string }
