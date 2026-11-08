@@ -97,12 +97,12 @@ migrate first. Paths are placeholders.
       "require_files": ["frontend/package-lock.json"],
       "require_npm": {
         "dir": "frontend",
-        "scripts": ["test", "lint", "typecheck", "build"]
+        "scripts": ["test", "typecheck", "build"]
       },
       "checks": [
         {"name": "install", "argv": ["npm", "--prefix", "frontend", "ci", "--ignore-scripts"], "network": true},
         {"name": "test", "argv": ["npm", "--prefix", "frontend", "run", "test"]},
-        {"name": "lint", "argv": ["npm", "--prefix", "frontend", "run", "lint"]},
+        {"name": "lint", "argv": ["frontend/node_modules/.bin/oxlint", "frontend/src"]},
         {"name": "typecheck", "argv": ["npm", "--prefix", "frontend", "run", "typecheck"]},
         {"name": "build", "argv": ["npm", "--prefix", "frontend", "run", "build"]}
       ]
@@ -124,8 +124,20 @@ Notes:
 - At the pinned Core base the frontend has no `test` or `typecheck` script, so
   `core-frontend` fails its preconditions until the card adds them. That is the
   intended behavior for BII-898, which owns that toolchain.
-- The full frontend build fails at the base because imports are missing; the
-  profile reports that failure and does not waive it.
+- Measured on Fedora at the pinned base `d79518b3` after `npm ci`:
+  `npm run build` exits 2 with 192 TypeScript errors (98 are `TS2307`, a
+  missing module such as `../components/ui`, `@/components/shadcn/ui/*` or
+  `./routes/Landing`; 88 are `TS7006` implicit `any` that follow from them).
+  `tsc -b` alone also exits 2. The profile reports this and does not waive it,
+  so every frontend card ends Blocked until the clean-room import closure
+  lands. Whether a toolchain-only slice such as BII-898 may use a narrower
+  profile without `build`/`typecheck` is a CTO decision, not made here; if
+  taken, give that profile its own non-overlapping title prefixes.
+- `npm run lint` runs `oxlint` with no ignore, so after `npm ci` it scans
+  `node_modules` and exits 1 (one error under `node_modules/@tailwindcss`)
+  even though `frontend/src` only has a warning. The proposal therefore calls
+  the binary directly on `frontend/src` (exit 0 at the base). Add
+  `frontend/tests` once it exists.
 - `core-backend` needs Docker and PostgreSQL. Without them every test is
   skipped, which the runner now counts as a failure.
 - No `core-docs` or Lab profiles are proposed: no verified documentation check
