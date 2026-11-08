@@ -87,6 +87,10 @@ func (s Sandbox) Wrap(argv []string) ([]string, error) {
 	if s.Network {
 		out = append(out,
 			"--setenv", "npm_config_registry", AllowedNPMRegistry,
+			// Two different, non-existent files in the private /tmp: npm treats a
+			// missing config as empty but refuses the same path for both levels.
+			"--setenv", "npm_config_userconfig", "/tmp/npm-userconfig",
+			"--setenv", "npm_config_globalconfig", "/tmp/npm-globalconfig",
 			"--setenv", "npm_config_ignore_scripts", "true",
 			"--setenv", "npm_config_cache", "/tmp/npm-cache",
 			"--setenv", "npm_config_audit", "false",

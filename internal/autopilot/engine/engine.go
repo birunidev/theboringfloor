@@ -425,6 +425,14 @@ func (e *Engine) runCard(ctx context.Context, r Resolved, summary board.Card, la
 	if c.ListID != r.Ready {
 		return fmt.Errorf("card %s left the ready list before claim", c.Ref())
 	}
+	// Fail closed at the claim boundary, not only in Tick/TickParallel: RunCard
+	// is public, and STOP and the budgets must hold for a direct call too.
+	if err := e.Paths.CheckStop(); err != nil {
+		return err
+	}
+	if err := e.Budget.Allow(c.Ref()); err != nil {
+		return fmt.Errorf("card %s: %w", c.Ref(), err)
+	}
 	// Refuse before any board write: no claim comment, no move, no worktree.
 	prof, err := r.BC.ProfileFor(c.Title)
 	if err != nil {
@@ -475,9 +483,11 @@ func (e *Engine) runCard(ctx context.Context, r Resolved, summary board.Card, la
 	run := handoff.Run{ID: runID, CardKey: c.Ref(), Title: c.Title, Repo: r.BC.RepoName, Branch: wt.Branch, LogPath: log.Path(), When: e.now()}
 	if len(r.BC.Setup) > 0 {
 		setStage("setup")
-		// Setup commands come from the member's config and run before any
-		// agent-written code exists in the worktree.
-		res, err := CmdChecker{Dir: wt.Path, Checks: r.BC.Setup, Unsandboxed: true}.Run(runCtx)
+		// Setup commands come from the member's config. They run in the same
+		// bubblewrap sandbox as the checks (read-only root, empty $HOME, no
+		// network, cleared environment), never on the host: a setup command
+		// has no more access to the member's files than the code it prepares.
+		res, err := CmdChecker{Dir: wt.Path, Checks: r.BC.Setup, Sandbox: &Sandbox{Worktree: wt.Path, ReadOnly: prof.SandboxReadOnly}}.Run(runCtx)
 		for _, s := range res {
 			if !s.Passed && err == nil {
 				err = fmt.Errorf("setup %q failed (exit %d)", s.Name, s.ExitCode)

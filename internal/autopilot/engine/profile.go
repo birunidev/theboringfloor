@@ -94,9 +94,11 @@ func (p Profile) Verify(worktree string) error {
 		if err != nil {
 			return err
 		}
-		fi, err := os.Lstat(path)
-		if err != nil || !fi.Mode().IsRegular() {
+		if fi, err := os.Lstat(path); err != nil || !fi.Mode().IsRegular() {
 			return fmt.Errorf("required file %q is missing from the worktree", rel)
+		}
+		if _, err := realInside(worktree, path); err != nil {
+			return fmt.Errorf("required file %q: %w", rel, err)
 		}
 	}
 	if p.RequireNPM == nil {
@@ -106,7 +108,11 @@ func (p Profile) Verify(worktree string) error {
 	if err != nil {
 		return err
 	}
-	data, err := os.ReadFile(filepath.Join(dir, "package.json"))
+	pkgPath, err := realInside(worktree, filepath.Join(dir, "package.json"))
+	if err != nil {
+		return fmt.Errorf("%s/package.json: %w", p.RequireNPM.Dir, err)
+	}
+	data, err := os.ReadFile(pkgPath)
 	if err != nil {
 		return fmt.Errorf("%s/package.json is unreadable: %w", p.RequireNPM.Dir, err)
 	}
@@ -135,6 +141,24 @@ func trivialScript(body string) bool {
 		return true
 	}
 	return strings.Contains(s, "|| true") || strings.Contains(s, "||true") || strings.Contains(s, "|| exit 0")
+}
+
+// realInside resolves path through symlinks and refuses a result that is not
+// inside the real worktree. The lexical check in inside cannot see a symlink
+// such as frontend -> /etc, so every runtime path goes through here too.
+func realInside(root, path string) (string, error) {
+	realRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return "", fmt.Errorf("worktree %q: %w", root, err)
+	}
+	real, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return "", fmt.Errorf("%q does not resolve: %w", path, err)
+	}
+	if real != realRoot && !strings.HasPrefix(real, realRoot+string(filepath.Separator)) {
+		return "", fmt.Errorf("%q resolves outside the worktree", path)
+	}
+	return real, nil
 }
 
 // inside resolves rel under root and refuses anything that escapes it.
@@ -220,37 +244,164 @@ func ValidateCheck(ch Check) error {
 			}
 		}
 	}
-	if isPytest(ch.Argv) {
-		for _, c := range ch.AllowExit {
-			if c == pytestNoTests {
-				return fmt.Errorf("check %q accepts pytest exit 5 (no tests collected); an empty suite is a failure", ch.Name)
-			}
-		}
+	// Every check is a required gate: it passes on exit 0 and only on exit 0.
+	// Accepting a non-zero exit (pytest 5, vitest 1, tsc 2, ...) would let a
+	// gate pass on failure, so allow_exit is refused outright.
+	if len(ch.AllowExit) > 0 {
+		return fmt.Errorf("check %q sets allow_exit %v; a required gate passes only on exit 0 (an empty pytest suite, exit 5, is a failure)", ch.Name, ch.AllowExit)
 	}
-	if ch.Network && !isLockedNPMInstall(ch.Argv) {
-		return fmt.Errorf("check %q requests network access; only `npm ci --ignore-scripts` may", ch.Name)
+	if ch.Network {
+		if _, ok := LockedNPMInstall(ch.Argv); !ok {
+			return fmt.Errorf("check %q requests network access; only the exact argv `npm [--prefix <dir>] ci --ignore-scripts` may", ch.Name)
+		}
 	}
 	return nil
 }
 
-// isLockedNPMInstall is the single command allowed to reach the network: a
-// lockfile-exact install with lifecycle scripts disabled.
-func isLockedNPMInstall(argv []string) bool {
-	if len(argv) < 3 || filepath.Base(argv[0]) != "npm" {
-		return false
+// LockedNPMInstall recognises the single command allowed to reach the
+// network, and returns the project directory it installs. The argv must be
+// exactly `npm ci --ignore-scripts` or `npm --prefix <relative dir> ci
+// --ignore-scripts`. Any other flag is refused, which closes --registry,
+// --userconfig, --ignore-scripts=false, --global, redirected install paths and
+// anything else npm would read from the command line.
+func LockedNPMInstall(argv []string) (dir string, ok bool) {
+	if len(argv) == 0 || filepath.Base(argv[0]) != "npm" || argv[0] != "npm" {
+		return "", false
 	}
-	hasCI, noScripts := false, false
-	for _, a := range argv[1:] {
-		switch a {
-		case "ci":
-			hasCI = true
-		case "--ignore-scripts":
-			noScripts = true
-		case "install", "i", "add", "update":
-			return false
+	rest := argv[1:]
+	dir = "."
+	if len(rest) >= 2 && rest[0] == "--prefix" {
+		dir, rest = rest[1], rest[2:]
+		if strings.HasPrefix(dir, "-") || dir == "" {
+			return "", false
+		}
+		if _, err := inside("/", dir); err != nil {
+			return "", false
 		}
 	}
-	return hasCI && noScripts
+	if len(rest) != 2 || rest[0] != "ci" || rest[1] != "--ignore-scripts" {
+		return "", false
+	}
+	return dir, true
+}
+
+// lockHostAllowed is the only host a lockfile may resolve packages from.
+const lockHostAllowed = "https://registry.npmjs.org/"
+
+// PreflightNetworkInstall runs before the one networked check. The sandbox
+// shares the host network for that command and bubblewrap cannot filter hosts,
+// so the guard is on what npm will be told to fetch: no npm configuration
+// files in the worktree that could redirect a registry or re-enable scripts, a
+// lockfile whose every package resolves from the pinned registry over https,
+// and an integrity hash on every package. This is not an egress firewall.
+func PreflightNetworkInstall(worktree string, argv []string) error {
+	rel, ok := LockedNPMInstall(argv)
+	if !ok {
+		return errors.New("network install argv is not the allowlisted `npm ci --ignore-scripts`")
+	}
+	dir, err := realInside(worktree, filepath.Join(worktree, rel))
+	if err != nil {
+		return fmt.Errorf("install directory: %w", err)
+	}
+	root, err := filepath.EvalSymlinks(worktree)
+	if err != nil {
+		return err
+	}
+	for _, d := range []string{root, dir} {
+		for _, name := range []string{".npmrc", ".yarnrc", ".yarnrc.yml", ".pnpmrc"} {
+			if _, err := os.Lstat(filepath.Join(d, name)); err == nil {
+				return fmt.Errorf("%s exists in the worktree; npm configuration there could redirect the registry", name)
+			}
+		}
+	}
+	lock, err := realInside(worktree, filepath.Join(dir, "package-lock.json"))
+	if err != nil {
+		return fmt.Errorf("package-lock.json: %w", err)
+	}
+	data, err := os.ReadFile(lock)
+	if err != nil {
+		return fmt.Errorf("package-lock.json is unreadable: %w", err)
+	}
+	var doc struct {
+		LockfileVersion int `json:"lockfileVersion"`
+		Packages        map[string]struct {
+			Resolved  string `json:"resolved"`
+			Integrity string `json:"integrity"`
+			Link      bool   `json:"link"`
+			InBundle  bool   `json:"inBundle"`
+		} `json:"packages"`
+	}
+	if err := json.Unmarshal(data, &doc); err != nil {
+		return fmt.Errorf("package-lock.json is not valid JSON: %w", err)
+	}
+	if doc.LockfileVersion < 2 || len(doc.Packages) == 0 {
+		return errors.New("package-lock.json needs lockfileVersion 2 or 3 with a packages map")
+	}
+	valid := func(resolved, integrity string) bool {
+		return strings.HasPrefix(resolved, lockHostAllowed) && (strings.HasPrefix(integrity, "sha512-") || strings.HasPrefix(integrity, "sha384-"))
+	}
+	for name, pkg := range doc.Packages {
+		if name == "" {
+			continue
+		}
+		if pkg.Link {
+			return fmt.Errorf("lockfile entry %q is a link; linked packages are not allowed", name)
+		}
+		if pkg.Resolved == "" && pkg.InBundle {
+			// A bundled dependency ships inside its parent's tarball and has no
+			// URL of its own. Accept it only when an ancestor entry that is
+			// itself fetched (or bundled) from the pinned registry carries it.
+			if err := bundledUnderValidParent(doc.Packages, name, valid); err != nil {
+				return fmt.Errorf("lockfile entry %q: %w", name, err)
+			}
+			continue
+		}
+		if !strings.HasPrefix(pkg.Resolved, lockHostAllowed) {
+			return fmt.Errorf("lockfile entry %q resolves from %q, not %s", name, clipLock(pkg.Resolved), lockHostAllowed)
+		}
+		if !valid(pkg.Resolved, pkg.Integrity) {
+			return fmt.Errorf("lockfile entry %q has no sha512/sha384 integrity", name)
+		}
+	}
+	return nil
+}
+
+func bundledUnderValidParent(pkgs map[string]struct {
+	Resolved  string `json:"resolved"`
+	Integrity string `json:"integrity"`
+	Link      bool   `json:"link"`
+	InBundle  bool   `json:"inBundle"`
+}, name string, valid func(resolved, integrity string) bool) error {
+	const sep = "/node_modules/"
+	for {
+		i := strings.LastIndex(name, sep)
+		if i < 0 {
+			return errors.New("is marked inBundle but is not nested under another package")
+		}
+		name = name[:i]
+		parent, ok := pkgs[name]
+		if !ok {
+			return fmt.Errorf("is marked inBundle but its parent %q is not in the lockfile", name)
+		}
+		switch {
+		case parent.Resolved == "" && parent.InBundle:
+			continue // bundled itself; keep walking up to a fetched ancestor
+		case valid(parent.Resolved, parent.Integrity):
+			return nil
+		default:
+			return fmt.Errorf("is inBundle under %q, which is not fetched from the pinned registry with integrity", name)
+		}
+	}
+}
+
+func clipLock(s string) string {
+	if len(s) > 80 {
+		return s[:80] + "…"
+	}
+	if s == "" {
+		return "(empty)"
+	}
+	return s
 }
 
 const pytestNoTests = 5

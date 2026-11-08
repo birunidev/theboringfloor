@@ -164,6 +164,14 @@ func (c Config) Validate() error {
 				return fmt.Errorf("config: board %q: %w", b.Name, err)
 			}
 		}
+		for _, ch := range b.Setup {
+			if ch.Network {
+				return fmt.Errorf("config: board %q: setup %q requests network access; only an install check may", b.Name, ch.Name)
+			}
+			if err := ValidateCheck(ch); err != nil {
+				return fmt.Errorf("config: board %q setup: %w", b.Name, err)
+			}
+		}
 		if err := validateProfiles(b); err != nil {
 			return err
 		}

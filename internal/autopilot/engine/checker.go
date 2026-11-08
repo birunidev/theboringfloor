@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"fmt"
 	"os"
 	"os/exec"
 	"regexp"
@@ -29,19 +28,21 @@ type CmdChecker struct {
 	Require func(dir string) error
 }
 
-// minimalEnv is all a check or setup command gets from the member's
-// environment. Tokens and keys never reach the command or its output.
-func minimalEnv() []string {
+// minimalEnv is all a check gets from the member's environment. HOME is the
+// worktree, never the member's real home, so even a command that escaped the
+// sandbox would not find ~/.ssh or ~/.config by following $HOME. This is
+// environment hygiene only; the filesystem boundary is the sandbox.
+func minimalEnv(home string) []string {
 	path := os.Getenv("PATH")
 	if path == "" {
 		path = "/usr/local/bin:/usr/bin:/bin"
 	}
-	return []string{"PATH=" + path, "HOME=" + os.Getenv("HOME"), "LANG=C.UTF-8", "CI=1"}
+	return []string{"PATH=" + path, "HOME=" + home, "LANG=C.UTF-8", "CI=1"}
 }
 
 // zeroTestMarkers are runner outputs that mean "nothing was tested", which
 // never counts as a pass even when the runner exits 0.
-var zeroTestMarkers = regexp.MustCompile(`(?mi)(^collected 0 items|\bno tests ran\b|no test files found|^# tests 0\s*$|\bno tests found\b|0 tests? collected|^\d+ skipped in [\d.]+s|all tests were skipped)`)
+var zeroTestMarkers = regexp.MustCompile(`(?mi)(^collected 0 items|\bno tests ran\b|no test files found|^# tests 0\s*$|\bno tests found\b|0 tests? collected|^\d+ skipped in [\d.]+s|^\s*Tests\s+\d+ skipped \(\d+\)\s*$|all tests were skipped)`)
 
 // Run implements pipeline.Checker. A command that cannot start counts as a
 // failed check, not an infrastructure error.
@@ -65,6 +66,13 @@ func (c CmdChecker) Run(ctx context.Context) ([]pipeline.CheckResult, error) {
 			if c.Sandbox == nil {
 				return out, ErrNoSandbox
 			}
+			if ch.Network {
+				if err := PreflightNetworkInstall(c.Dir, ch.Argv); err != nil {
+					out = append(out, pipeline.CheckResult{Name: ch.Name, Cmd: strings.Join(ch.Argv, " "), ExitCode: -1, Passed: false,
+						Output: "network install refused before running: " + err.Error()})
+					continue
+				}
+			}
 			sb := *c.Sandbox
 			sb.Network = ch.Network
 			wrapped, err := sb.Wrap(ch.Argv)
@@ -76,7 +84,7 @@ func (c CmdChecker) Run(ctx context.Context) ([]pipeline.CheckResult, error) {
 		cctx, cancel := context.WithTimeout(ctx, to)
 		cmd := exec.CommandContext(cctx, argv[0], argv[1:]...)
 		cmd.Dir = c.Dir
-		cmd.Env = minimalEnv()
+		cmd.Env = minimalEnv(c.Dir)
 		var buf bytes.Buffer
 		cmd.Stdout, cmd.Stderr = &buf, &buf
 		err := cmd.Run()
@@ -90,18 +98,14 @@ func (c CmdChecker) Run(ctx context.Context) ([]pipeline.CheckResult, error) {
 		case err == nil:
 		case errors.As(err, &ee):
 			r.ExitCode = ee.ExitCode()
-			for _, ok := range ch.AllowExit {
-				if ok == r.ExitCode {
-					r.Passed = true
-					r.Note = fmt.Sprintf("exit %d accepted (configured)", r.ExitCode)
-				}
-			}
+			// A non-zero exit is a failure. allow_exit is refused at config
+			// load and ignored here, so a stale config cannot weaken a gate.
 		default:
 			r.ExitCode = -1
 			r.Output = strings.TrimSpace(r.Output + "\n" + err.Error())
 		}
-		if r.Passed && isPytest(ch.Argv) && r.ExitCode == pytestNoTests {
-			r.Passed, r.Note = false, "pytest exit 5 means no tests were collected; an empty suite is a failure"
+		if isPytest(ch.Argv) && r.ExitCode == pytestNoTests {
+			r.Note = "pytest exit 5 means no tests were collected; an empty suite is a failure"
 		}
 		if r.Passed && zeroTestMarkers.MatchString(r.Output) {
 			r.Passed, r.Note = false, "the runner reported that no tests ran; an empty suite is a failure"
