@@ -19,11 +19,16 @@ type Sandbox struct {
 	ReadOnly []string // extra paths under $HOME to expose read-only (venv, deps)
 	Bwrap    string   // default: "bwrap" on PATH
 	// Network shares the host network namespace for one dependency-install
-	// check. bubblewrap cannot filter hosts, so the install is kept narrow:
-	// the validated command is `npm ci --ignore-scripts`, HOME is an empty
+	// check. bubblewrap cannot filter hosts, so the command is kept narrow:
+	// `npm ci --ignore-scripts` or the lockfile generation
+	// `npm install --package-lock-only --ignore-scripts`, HOME is an empty
 	// tmpfs (no ~/.npmrc or tokens), the environment is cleared, and the
 	// registry is pinned by npm_config_registry below.
 	Network bool
+	// NPMBefore, when set with Network, is passed as npm_config_before so a
+	// lockfile generation resolves versions as of a fixed instant (RFC 3339
+	// UTC, validated in Wrap).
+	NPMBefore string
 }
 
 // AllowedNPMRegistry is the only registry a networked install is pointed at.
@@ -96,6 +101,12 @@ func (s Sandbox) Wrap(argv []string) ([]string, error) {
 			"--setenv", "npm_config_audit", "false",
 			"--setenv", "npm_config_fund", "false",
 			"--setenv", "npm_config_update_notifier", "false")
+		if s.NPMBefore != "" {
+			if !beforeStamp.MatchString(s.NPMBefore) {
+				return nil, fmt.Errorf("sandbox: refusing npm --before value %q", s.NPMBefore)
+			}
+			out = append(out, "--setenv", "npm_config_before", s.NPMBefore)
+		}
 	}
 	out = append(out, "--")
 	return append(out, argv...), nil

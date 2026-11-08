@@ -115,6 +115,106 @@ never taken from card text and never chosen by a model.
 - Node under nvm is reached by listing the version directory in
   `sandbox_read_only`.
 
+## Runner-owned npm lockfile generation
+
+**Problem.** A frontend toolchain card edits `package.json` but cannot produce a real
+`package-lock.json`: the implementer agent has no network and no npm, and an
+`npm install` command prefix must never be added to its allowed shell (the prefix
+matches any following arguments, so it would admit unreviewed flags and package
+sources). The sandboxed `npm ci` check needs the lockfile to exist, and the card is the
+one that creates it.
+
+**Fix.** A profile that sets `allow_lockfile_generation: true` has a runner-owned check:
+
+```
+npm [--prefix <dir>] install --package-lock-only --ignore-scripts
+```
+
+The runner starts it, not the model. It runs in the same bubblewrap sandbox as every
+check (read-only root, empty `$HOME`, cleared environment, private npm cache, registry
+pinned to `https://registry.npmjs.org/`, `userconfig`/`globalconfig` pointed at two
+non-existent files) with the host network shared for that one command.
+
+Before npm starts, the runner refuses (nothing is run, nothing is fetched):
+
+- an argv that is not exactly the line above: no package names, `--registry`,
+  `--before`, `--save`, `--global`, `--workspaces`, `--force`, an absolute or `..`
+  prefix, or `--ignore-scripts=false`;
+- a profile that has not opted in (config load and again at runtime), a check without
+  `network: true`, or a profile that does not own exactly `<dir>/package.json` and
+  `<dir>/package-lock.json` in `allowed_paths`, that lists the lockfile in
+  `require_files`, or that has no strict `npm ci --ignore-scripts` check after it;
+- a `.npmrc`, `.yarnrc`, `.pnpmrc` or `npm-shrinkwrap.json` in the worktree root or
+  project directory;
+- a symlinked or non-regular `package.json`, project directory or existing lockfile,
+  or any of them resolving outside the real worktree;
+- a `package.json` that is not plain registry versions. Every entry in
+  `dependencies`, `devDependencies`, `optionalDependencies`, `peerDependencies`,
+  `overrides` and `resolutions` must be a registry package name and a version range
+  with a digit: git, github shorthand, http(s) URLs, `file:`, `link:`, `workspace:`,
+  `npm:` aliases, relative paths, bare dist-tags (`latest`) and `*` are all refused,
+  `workspaces` is refused, and the file may not exceed 256 KiB or 400 entries.
+
+Then:
+
+1. An existing `package-lock.json` (one an agent wrote) is deleted, and so is the
+   project's `node_modules` (a symlinked one is refused, never followed). The runner
+   never trusts a lockfile it did not generate. Removing `node_modules` is not only
+   hygiene: with an installed tree present, `npm install --package-lock-only` builds
+   entries from that tree, which has no registry metadata, so the entries come out
+   without `resolved` and integrity. A second fix round, or a retried card, reuses the
+   worktree and its `node_modules` from the previous `npm ci`, so without this the
+   regenerated lockfile is incomplete and is rightly refused. Measured: a fresh
+   worktree gave a complete 307-entry lockfile every time (6 of 6 runs); a worktree
+   still holding the previous round's `node_modules` gave entries with no `resolved`.
+2. npm runs with `--before=<run start time>` (UTC), so every fix round of one run
+   resolves the same registry state, and the timestamp is printed in the check output.
+3. The runner confirms `package.json` is byte-for-byte what it validated, and that the
+   lockfile is a non-empty regular file under 8 MiB that passes the **same** validation
+   `npm ci` gets: `lockfileVersion` exactly 2 or 3, no `link` entries, every package
+   resolved from `https://registry.npmjs.org/` with a sha512/sha384 integrity hash
+   (bundled dependencies only under a validated parent).
+4. npm runs a **second time**; the lockfile must be byte-identical. A lockfile that
+   changes on regeneration is refused.
+5. The profile's `npm ci --ignore-scripts` check then installs from it in the sandbox,
+   and the existing Vitest and lint checks run. `package-lock.json` is an owned path, so
+   source ownership sees it as an allowed change and it appears in the full diff.
+
+The result is a normal check (`lockfile`) with the lockfile hash, entry count and the
+`--before` stamp in its output, so a reviewer can reproduce it.
+
+**What is and is not enforced at the network boundary.** bubblewrap cannot filter
+hostnames, so this is not an egress firewall. For the generation command the sandbox
+shares the host network; what constrains it is that it can only be told to read
+registry package metadata from `registry.npmjs.org` (pinned registry, no `.npmrc`, no
+non-registry specs in `package.json`, no extra flags), runs no scripts, and its result is
+discarded unless every resolved URL is on that host. A hostile registry response naming
+another host is caught by the lockfile validation, not by the network. If those
+constraints cannot hold (for example an `.npmrc` is present), the step fails closed.
+
+**Security findings from building this** (all covered by tests):
+
+- Lockfile validation was only enforced for `npm ci`; the generated lockfile goes
+  through the same function, so a compromised or buggy generation cannot slip a
+  non-registry source through to `npm ci`.
+- `npm-shrinkwrap.json` is preferred by npm over `package-lock.json` and was not
+  refused. It now is, for both generation and `npm ci`.
+- A `.npmrc` can set a scoped registry or `ignore-scripts=false`, and environment
+  variables do not override those keys; it is refused before any npm command runs.
+- Version specs in `package.json` are the real source of package origins. The allowed
+  alphabet has no `:`, `/`, `\` or `@`, which excludes every non-registry source form.
+- The capability is profile-scoped and fully owned: only a profile that opts in may use
+  it, and it must own exactly the two files it writes. It cannot appear as a board-wide
+  check or in `setup`.
+
+**Install and rollback** (runner binary and config change together; STOP set, no
+worker): see the PR description. In short: build to a side path, validate the migrated
+config with the new loader (`--dry-run --board __no_such_board__`), back up the binary
+and config, swap by rename, and restore both from the backup to roll back. The binary and config change together:
+the previous binary refuses the new `allow_lockfile_generation` field (unknown field),
+while the new binary still accepts the previous config but then has no lockfile step, so
+BII-898 would stop at the missing lockfile again.
+
 ## Known limits
 
 - The Working-list move still happens at claim, before the agent pre-flight.
@@ -163,7 +263,6 @@ migrate first. Paths are placeholders. This block is parsed and validated by
         "frontend/tests/toolchain-smoke.test.ts"
       ],
       "require_files": [
-        "frontend/package-lock.json",
         "frontend/vitest.config.ts",
         "frontend/tests/setup.ts",
         "frontend/tests/toolchain-smoke.test.ts"
@@ -176,6 +275,18 @@ migrate first. Paths are placeholders. This block is parsed and validated by
         ]
       },
       "checks": [
+        {
+          "name": "lockfile",
+          "argv": [
+            "npm",
+            "--prefix",
+            "frontend",
+            "install",
+            "--package-lock-only",
+            "--ignore-scripts"
+          ],
+          "network": true
+        },
         {
           "name": "install",
           "argv": [
@@ -207,7 +318,8 @@ migrate first. Paths are placeholders. This block is parsed and validated by
             "frontend/tests"
           ]
         }
-      ]
+      ],
+      "allow_lockfile_generation": true
     },
     {
       "name": "core-frontend-tailwind",
@@ -366,16 +478,18 @@ Notes:
   has its own unique prefix. Any other frontend title, for example a new
   `[V2 FE ...` slice, matches no profile and is refused until a profile for it
   is defined. That is the intended fail-closed behavior.
-- **`core-frontend-toolchain` (BII-898)** owns exactly six files, requires the
-  lockfile, Vitest config, setup and smoke test to exist, requires `test` and
-  `typecheck` scripts to exist, installs from the lockfile in the sandbox, runs
-  Vitest (at least one passing test; no skipped, todo or failed), and lints
-  `frontend/src` and `frontend/tests`. It deliberately does not run `typecheck`
-  or `build`: at the pinned base they fail for reasons the card does not own
-  (below). That is a recorded **baseline FAIL**, never a pass. Whether the
-  smoke test is *meaningful* (React, Query, Router and Axios actually
-  exercised) is a CTO review judgment; a machine can only require that real
-  tests ran.
+- **`core-frontend-toolchain` (BII-898)** owns exactly six files. The agent edits
+  `frontend/package.json`; the **runner** then generates `frontend/package-lock.json`
+  from it (see "Runner-owned npm lockfile generation"), runs `npm ci` from that
+  lockfile in the sandbox, runs Vitest (at least one passing test; no skipped,
+  todo or failed), and lints `frontend/src` and `frontend/tests`. It requires the
+  Vitest config, setup and smoke test to exist and the `test` and `typecheck`
+  scripts to exist, but does not require the lockfile to exist beforehand: the
+  agent has no way to make a real one. It deliberately does not run `typecheck` or
+  `build`: at the pinned base they fail for reasons the card does not own (below).
+  That is a recorded **baseline FAIL**, never a pass. Whether the smoke test is
+  *meaningful* (React, Query, Router and Axios actually exercised) is a CTO review
+  judgment; a machine can only require that real tests ran.
 - **`core-frontend-tailwind` (BII-899)** owns exactly `app.css`, `shadcn.css`
   and `css-contract.test.mjs`, and needs no packages, so it does not depend on
   BII-898's lockfile. It runs the card's `node:test` file with the TAP reporter,
