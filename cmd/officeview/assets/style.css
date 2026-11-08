@@ -456,6 +456,25 @@ meter::-moz-meter-bar {
 .shelf p {
   font-size: 14px;
 }
+.shelf .clarification-context {
+  display: grid;
+  gap: 6px;
+  margin-top: 8px;
+  padding-top: 10px;
+  border-top: 1px solid var(--divider);
+  overflow-wrap: anywhere;
+  font-size: 14px;
+}
+.shelf .clarification-context strong {
+  font-weight: 650;
+}
+.shelf .clarification-context ol {
+  margin: 0;
+  padding-left: 20px;
+}
+.shelf .clarification-context li + li {
+  margin-top: 6px;
+}
 .activity > h2 {
   margin-bottom: 12px;
 }

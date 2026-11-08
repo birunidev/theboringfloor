@@ -544,10 +544,7 @@ func (e *Engine) finish(ctx context.Context, g *board.Guard, r Resolved, c board
 		comment, list = handoff.BlockedComment(run, out), r.Blocked
 	}
 	status.Note = string(out.Kind)
-	data := map[string]any{"kind": out.Kind, "summary": out.Summary, "rounds": len(out.Rounds), "pr": run.PRURL}
-	if out.Err != nil {
-		data["error"] = out.Err.Error()
-	}
+	data := outcomeEventData(out, run.PRURL)
 	_ = log.Write(runstate.Event{Kind: "end", Msg: out.Summary, Data: data})
 	e.printf("%s: %s — %s %s\n", c.Ref(), out.Kind, out.Summary, run.PRURL)
 	if err := g.AddComment(fctx, c.ID, comment, idem("outcome")); err != nil {
