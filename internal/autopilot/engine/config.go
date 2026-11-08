@@ -25,6 +25,13 @@ type Check struct {
 	// network namespace). Only `npm ci --ignore-scripts` is accepted; see
 	// ValidateCheck.
 	Network bool `json:"network,omitempty"`
+	// RequireOutput is a regular expression the combined output must match,
+	// and RejectOutput one it must not. They let a profile insist on evidence a
+	// bare exit code cannot give: node:test exits 0 for an empty test file and
+	// for skipped tests, so a profile requires a minimum test count and rejects
+	// skipped or todo tests. Both are compiled at config load.
+	RequireOutput string `json:"require_output,omitempty"`
+	RejectOutput  string `json:"reject_output,omitempty"`
 }
 
 // Lane routes explicitly named card-title prefixes to one board working list.

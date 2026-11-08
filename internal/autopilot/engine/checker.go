@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"regexp"
@@ -26,6 +27,9 @@ type CmdChecker struct {
 	// Require runs before any check (profile preconditions). Its error is a
 	// failed check, never an infrastructure error and never a silent pass.
 	Require func(dir string) error
+	// Owns runs before any check and fails the run when the worktree holds a
+	// change outside the profile's allowed paths.
+	Owns func(ctx context.Context) error
 }
 
 // minimalEnv is all a check gets from the member's environment. HOME is the
@@ -52,6 +56,11 @@ func (c CmdChecker) Run(ctx context.Context) ([]pipeline.CheckResult, error) {
 		to = 15 * time.Minute
 	}
 	var out []pipeline.CheckResult
+	if c.Owns != nil {
+		if err := c.Owns(ctx); err != nil {
+			return []pipeline.CheckResult{{Name: "profile source ownership", Cmd: "verify changed files against the profile", ExitCode: -1, Passed: false, Output: err.Error()}}, nil
+		}
+	}
 	if c.Require != nil {
 		if err := c.Require(c.Dir); err != nil {
 			return []pipeline.CheckResult{{Name: "profile preconditions", Cmd: "verify profile requirements", ExitCode: -1, Passed: false, Output: err.Error()}}, nil
@@ -92,7 +101,11 @@ func (c CmdChecker) Run(ctx context.Context) ([]pipeline.CheckResult, error) {
 		if ctx.Err() != nil {
 			return out, ctx.Err()
 		}
-		r := pipeline.CheckResult{Name: ch.Name, Cmd: strings.Join(ch.Argv, " "), Output: tailBytes(buf.Bytes(), 8000), Passed: err == nil}
+		// Test runners colour their summaries even when CI=1 (Vitest does), and
+		// an escape code in front of "Tests" defeats every anchored pattern.
+		// Match and report on the plain text.
+		clean := stripANSI(buf.String())
+		r := pipeline.CheckResult{Name: ch.Name, Cmd: strings.Join(ch.Argv, " "), Output: tailBytes([]byte(clean), 8000), Passed: err == nil}
 		var ee *exec.ExitError
 		switch {
 		case err == nil:
@@ -107,6 +120,11 @@ func (c CmdChecker) Run(ctx context.Context) ([]pipeline.CheckResult, error) {
 		if isPytest(ch.Argv) && r.ExitCode == pytestNoTests {
 			r.Note = "pytest exit 5 means no tests were collected; an empty suite is a failure"
 		}
+		if r.Passed {
+			if why := outputAssertion(ch, clean); why != "" {
+				r.Passed, r.Note = false, why
+			}
+		}
 		if r.Passed && zeroTestMarkers.MatchString(r.Output) {
 			r.Passed, r.Note = false, "the runner reported that no tests ran; an empty suite is a failure"
 		}
@@ -114,6 +132,34 @@ func (c CmdChecker) Run(ctx context.Context) ([]pipeline.CheckResult, error) {
 	}
 	return out, nil
 }
+
+// outputAssertion applies a check's require_output / reject_output to its full
+// output and returns why the check must fail, or "".
+func outputAssertion(ch Check, output string) string {
+	if ch.RejectOutput != "" {
+		re, err := regexp.Compile(ch.RejectOutput)
+		if err != nil {
+			return "reject_output is not a valid regular expression: " + err.Error()
+		}
+		if m := re.FindString(output); m != "" {
+			return fmt.Sprintf("output matched reject_output %q: %q", ch.RejectOutput, strings.TrimSpace(m))
+		}
+	}
+	if ch.RequireOutput != "" {
+		re, err := regexp.Compile(ch.RequireOutput)
+		if err != nil {
+			return "require_output is not a valid regular expression: " + err.Error()
+		}
+		if !re.MatchString(output) {
+			return fmt.Sprintf("output did not match require_output %q (the evidence this gate needs is missing)", ch.RequireOutput)
+		}
+	}
+	return ""
+}
+
+var ansiEscape = regexp.MustCompile(`\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(\x07|\x1b\\)`)
+
+func stripANSI(s string) string { return ansiEscape.ReplaceAllString(s, "") }
 
 func tailBytes(b []byte, n int) string {
 	if len(b) > n {

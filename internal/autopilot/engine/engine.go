@@ -504,7 +504,13 @@ func (e *Engine) runCard(ctx context.Context, r Resolved, summary board.Card, la
 	defer cleanup()
 	run.Base = r.BC.Base
 	run.BaseSHA = wt.BaseSHA
-	out := pipeline.Run(runCtx, cardContext(c, r), agent, WTWorkspace{WT: wt}, CmdChecker{Dir: wt.Path, Checks: prof.Checks, Require: prof.Verify, Sandbox: &Sandbox{Worktree: wt.Path, ReadOnly: prof.SandboxReadOnly}}, pipeline.Config{MaxRounds: e.Cfg.MaxRounds})
+	out := pipeline.Run(runCtx, cardContext(c, r), agent, WTWorkspace{WT: wt}, CmdChecker{Dir: wt.Path, Checks: prof.Checks, Require: prof.Verify, Owns: func(ctx context.Context) error {
+		files, err := worktree.ChangedFiles(ctx, wt)
+		if err != nil {
+			return err
+		}
+		return prof.Owns(files)
+	}, Sandbox: &Sandbox{Worktree: wt.Path, ReadOnly: prof.SandboxReadOnly}}, pipeline.Config{MaxRounds: e.Cfg.MaxRounds})
 	if out.Kind == pipeline.ReadyForReview {
 		setStage("publish")
 		url, head, err := e.Pub.Publish(runCtx, wt.Path, wt.Branch, r.BC.Base, handoff.CommitMessage(run, out), handoff.PRTitle(run), handoff.PRBody(run, out))

@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"github.com/theboringhumane/theboringfloor/internal/autopilot/pipeline"
 )
 
 // Profile is a named, explicit set of deterministic checks for one kind of
@@ -27,6 +29,27 @@ type Profile struct {
 	RequireFiles []string `json:"require_files,omitempty"`
 	// RequireNPM lists package.json scripts that must exist and do real work.
 	RequireNPM *NPMRequire `json:"require_npm,omitempty"`
+	// AllowedPaths is the exact set of files (or dir/** globs) a card on this
+	// profile may change. It comes from config, not from the agent's pre-flight,
+	// so an agent cannot widen its own scope. Empty means no profile-level limit.
+	AllowedPaths []string `json:"allowed_paths,omitempty"`
+}
+
+// Owns reports the changed files that fall outside the profile's AllowedPaths.
+func (p Profile) Owns(files []string) error {
+	if len(p.AllowedPaths) == 0 {
+		return nil
+	}
+	var out []string
+	for _, f := range files {
+		if !pipeline.InScope(f, p.AllowedPaths) {
+			out = append(out, f)
+		}
+	}
+	if len(out) > 0 {
+		return fmt.Errorf("profile %q does not own these changed files: %s (allowed: %s)", p.Name, strings.Join(out, ", "), strings.Join(p.AllowedPaths, ", "))
+	}
+	return nil
 }
 
 // NPMRequire names package.json scripts a profile depends on.
@@ -250,6 +273,14 @@ func ValidateCheck(ch Check) error {
 	if len(ch.AllowExit) > 0 {
 		return fmt.Errorf("check %q sets allow_exit %v; a required gate passes only on exit 0 (an empty pytest suite, exit 5, is a failure)", ch.Name, ch.AllowExit)
 	}
+	for label, expr := range map[string]string{"require_output": ch.RequireOutput, "reject_output": ch.RejectOutput} {
+		if expr == "" {
+			continue
+		}
+		if _, err := regexp.Compile(expr); err != nil {
+			return fmt.Errorf("check %q: %s is not a valid regular expression: %w", ch.Name, label, err)
+		}
+	}
 	if ch.Network {
 		if _, ok := LockedNPMInstall(ch.Argv); !ok {
 			return fmt.Errorf("check %q requests network access; only the exact argv `npm [--prefix <dir>] ci --ignore-scripts` may", ch.Name)
@@ -460,6 +491,14 @@ func validateProfiles(b BoardConfig) error {
 		for _, rel := range p.RequireFiles {
 			if _, err := inside("/", rel); err != nil {
 				return fmt.Errorf("config: profile %q: %w", p.Name, err)
+			}
+		}
+		for _, rel := range p.AllowedPaths {
+			if strings.TrimSpace(rel) == "" || strings.HasPrefix(strings.TrimSpace(rel), "/") || strings.Contains(rel, "..") {
+				return fmt.Errorf("config: profile %q has an invalid allowed_paths entry %q", p.Name, rel)
+			}
+			if r := strings.TrimSuffix(strings.TrimSpace(rel), "/"); r == "**" || r == "*" || r == "." {
+				return fmt.Errorf("config: profile %q allowed_paths %q is the whole repository; list the files the card owns", p.Name, rel)
 			}
 		}
 		if p.RequireNPM != nil {

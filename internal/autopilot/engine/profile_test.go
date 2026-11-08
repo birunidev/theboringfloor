@@ -2,10 +2,12 @@ package engine
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -601,5 +603,240 @@ func TestSandboxedProfileCheckCannotReadTheMembersHome(t *testing.T) {
 	}
 	if res[0].Passed || strings.Contains(res[0].Output, "SECRET-KEY") {
 		t.Fatalf("check read a forbidden location: %+v", res[0])
+	}
+}
+
+func TestOutputAssertionsAndOwnershipAreValidatedAtConfigLoad(t *testing.T) {
+	ok := Check{Name: "ok", Argv: []string{"true"}}
+	cases := []struct {
+		name string
+		p    Profile
+		want string
+	}{
+		{"bad require_output regex", Profile{Name: "x", TitlePrefixes: []string{"[A"}, Checks: []Check{{Name: "t", Argv: []string{"true"}, RequireOutput: "(unclosed"}}}, "regular expression"},
+		{"bad reject_output regex", Profile{Name: "x", TitlePrefixes: []string{"[A"}, Checks: []Check{{Name: "t", Argv: []string{"true"}, RejectOutput: "[z-a]"}}}, "regular expression"},
+		{"allowed_paths absolute", Profile{Name: "x", TitlePrefixes: []string{"[A"}, Checks: []Check{ok}, AllowedPaths: []string{"/etc/passwd"}}, "allowed_paths"},
+		{"allowed_paths parent escape", Profile{Name: "x", TitlePrefixes: []string{"[A"}, Checks: []Check{ok}, AllowedPaths: []string{"../outside"}}, "allowed_paths"},
+		{"allowed_paths empty entry", Profile{Name: "x", TitlePrefixes: []string{"[A"}, Checks: []Check{ok}, AllowedPaths: []string{" "}}, "allowed_paths"},
+		{"allowed_paths whole repository", Profile{Name: "x", TitlePrefixes: []string{"[A"}, Checks: []Check{ok}, AllowedPaths: []string{"**"}}, "whole repository"},
+		{"allowed_paths dot", Profile{Name: "x", TitlePrefixes: []string{"[A"}, Checks: []Check{ok}, AllowedPaths: []string{"./"}}, "whole repository"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := validate(t, boardWith([]Profile{tc.p})); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("config error = %v, want %q", err, tc.want)
+			}
+		})
+	}
+}
+
+func TestProfileOwnsOnlyTheFilesItListsFromConfigNotFromTheAgent(t *testing.T) {
+	p := Profile{Name: "core-frontend-toolchain", AllowedPaths: []string{
+		"frontend/package.json", "frontend/package-lock.json", "frontend/tests/setup.ts", "frontend/tests/*.test.ts"}}
+	if err := p.Owns([]string{"frontend/package.json", "frontend/package-lock.json", "frontend/tests/setup.ts", "frontend/tests/toolchain-smoke.test.ts"}); err != nil {
+		t.Fatalf("owned files refused: %v", err)
+	}
+	for _, bad := range []string{"frontend/src/main.tsx", "backend/app/x.py", ".github/workflows/ci.yml", "frontend/package.json.bak", "frontend/tests/nested/x.test.ts", "frontend/../backend/x.py"} {
+		if err := p.Owns([]string{"frontend/package.json", bad}); err == nil || !strings.Contains(err.Error(), bad) {
+			t.Errorf("%q was not refused: %v", bad, err)
+		}
+	}
+	if err := (Profile{Name: "unrestricted"}).Owns([]string{"anything"}); err != nil {
+		t.Fatalf("a profile without allowed_paths must not restrict: %v", err)
+	}
+	// The checker turns an ownership violation into a failed check before any
+	// command runs.
+	ran := filepath.Join(t.TempDir(), "ran")
+	probe := fakeTool(t, "probe", "touch "+ran)
+	res, err := CmdChecker{Dir: t.TempDir(), Unsandboxed: true, Checks: []Check{{Name: "never", Argv: []string{probe}}},
+		Owns: func(context.Context) error { return p.Owns([]string{"frontend/src/main.tsx"}) }}.Run(context.Background())
+	if err != nil || len(res) != 1 || res[0].Passed || res[0].Name != "profile source ownership" || !strings.Contains(res[0].Output, "frontend/src/main.tsx") {
+		t.Fatalf("res=%+v err=%v", res, err)
+	}
+	if _, err := os.Stat(ran); err == nil {
+		t.Fatal("a check ran although the profile does not own the change")
+	}
+}
+
+func TestRequireAndRejectOutputCatchWhatAnExitCodeCannot(t *testing.T) {
+	tap := func(tests, pass, fail, skipped, todo int) string {
+		return "printf '# tests " + itoa(tests) + "\\n# suites 0\\n# pass " + itoa(pass) + "\\n# fail " + itoa(fail) + "\\n# cancelled 0\\n# skipped " + itoa(skipped) + "\\n# todo " + itoa(todo) + "\\n'; exit 0"
+	}
+	require := `(?m)^# tests ([5-9]|[1-9][0-9]+)$`
+	reject := `(?m)^# (skipped|todo|cancelled) [1-9]`
+	mk := func(name, body string) Check {
+		return Check{Name: name, Argv: []string{fakeTool(t, name, body)}, RequireOutput: require, RejectOutput: reject}
+	}
+	checks := []Check{
+		mk("six-real-tests", tap(6, 6, 0, 0, 0)),
+		mk("empty-file-counts-as-one-test", tap(1, 1, 0, 0, 0)),
+		mk("four-tests-is-too-few", tap(4, 4, 0, 0, 0)),
+		mk("one-skipped", tap(6, 5, 0, 1, 0)),
+		mk("one-todo", tap(6, 5, 0, 0, 1)),
+		{Name: "bad-regex-at-runtime", Argv: []string{fakeTool(t, "x", "echo hi")}, RequireOutput: "(unclosed"},
+	}
+	res, err := CmdChecker{Dir: t.TempDir(), Checks: checks, Unsandboxed: true}.Run(context.Background())
+	if err != nil || len(res) != len(checks) {
+		t.Fatalf("res=%d err=%v", len(res), err)
+	}
+	want := []bool{true, false, false, false, false, false}
+	for i, r := range res {
+		if r.Passed != want[i] {
+			t.Errorf("%s: passed=%v, want %v (note %q)", r.Name, r.Passed, want[i], r.Note)
+		}
+		if !r.Passed && r.Note == "" {
+			t.Errorf("%s: failed without saying why", r.Name)
+		}
+	}
+}
+
+func itoa(n int) string { return strconv.Itoa(n) }
+
+// The regexes above are only worth anything if they match what node really
+// prints. This runs the real node:test runner (Node 24) on four files.
+func TestNodeTestRealRunnerEmptySkippedAndShortSuitesAreRejected(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node not on PATH")
+	}
+	dir := t.TempDir()
+	write := func(name, body string) {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	head := "import test from 'node:test';\nimport assert from 'node:assert';\n"
+	var six strings.Builder
+	six.WriteString(head)
+	for i := 0; i < 6; i++ {
+		six.WriteString("test('t" + itoa(i) + "', () => assert.equal(1 + 1, 2));\n")
+	}
+	write("six.test.mjs", six.String())
+	write("empty.test.mjs", "import test from 'node:test';\n")
+	write("skip.test.mjs", six.String()+"test('s', { skip: true }, () => {});\n")
+	write("short.test.mjs", head+"test('a', () => assert.ok(true));\ntest('b', () => assert.ok(true));\n")
+	write("fail.test.mjs", six.String()+"test('bad', () => assert.equal(1, 2));\n")
+	mk := func(file string) Check {
+		return Check{Name: file, Argv: []string{node, "--test", "--test-reporter=tap", filepath.Join(dir, file)},
+			RequireOutput: `(?m)^# tests ([5-9]|[1-9][0-9]+)$`, RejectOutput: `(?m)^# (skipped|todo|cancelled) [1-9]`}
+	}
+	res, err := CmdChecker{Dir: dir, Unsandboxed: true, Checks: []Check{mk("six.test.mjs"), mk("empty.test.mjs"), mk("skip.test.mjs"), mk("short.test.mjs"), mk("fail.test.mjs")}}.Run(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]bool{"six.test.mjs": true, "empty.test.mjs": false, "skip.test.mjs": false, "short.test.mjs": false, "fail.test.mjs": false}
+	for _, r := range res {
+		if r.Passed != want[r.Name] {
+			t.Errorf("%s: passed=%v (exit %d, note %q), want %v\n%s", r.Name, r.Passed, r.ExitCode, r.Note, want[r.Name], r.Output)
+		}
+	}
+	// Without the assertions node:test passes an empty file and skipped tests,
+	// which is exactly the gap the assertions close.
+	bare, _ := CmdChecker{Dir: dir, Unsandboxed: true, Checks: []Check{
+		{Name: "empty", Argv: []string{node, "--test", "--test-reporter=tap", filepath.Join(dir, "empty.test.mjs")}},
+		{Name: "skip", Argv: []string{node, "--test", "--test-reporter=tap", filepath.Join(dir, "skip.test.mjs")}},
+	}}.Run(context.Background())
+	for _, r := range bare {
+		if !r.Passed {
+			t.Skipf("this node version already fails %s (%s); the assertions are redundant here", r.Name, r.Output)
+		}
+	}
+}
+
+// Vitest 5.1 prints its summary with colour codes even under CI=1, so the
+// patterns must see plain text. These are the real summary lines with the
+// escape sequences Vitest emits around them.
+func TestAssertionsAndEmptySuiteMarkersSeeThroughColourCodes(t *testing.T) {
+	const esc = "\x1b"
+	line := func(s string) string {
+		return "printf '" + esc + "[2m     Tests " + esc + "[22m " + esc + "[1m" + esc + "[32m" + s + esc + "[39m" + esc + "[22m\\n'; exit 0"
+	}
+	require := `(?m)^\s*Tests\s+[1-9][0-9]* passed`
+	reject := `(?m)^\s*Tests\s.*\b(skipped|todo|failed)\b`
+	mk := func(name, body string) Check {
+		return Check{Name: name, Argv: []string{fakeTool(t, name, body)}, RequireOutput: require, RejectOutput: reject}
+	}
+	checks := []Check{
+		mk("coloured-pass", line("3 passed (3)")),
+		mk("coloured-skip", line("1 passed | 1 skipped | 1 todo (3)")),
+		mk("coloured-no-tests", line("no tests")),
+		{Name: "coloured-zero-marker", Argv: []string{fakeTool(t, "z", "printf '"+esc+"[33mNo test files found"+esc+"[39m, exiting\\n'; exit 0")}},
+	}
+	res, err := CmdChecker{Dir: t.TempDir(), Checks: checks, Unsandboxed: true}.Run(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []bool{true, false, false, false}
+	for i, r := range res {
+		if r.Passed != want[i] {
+			t.Errorf("%s: passed=%v, want %v (note %q)", r.Name, r.Passed, want[i], r.Note)
+		}
+		if strings.Contains(r.Output, esc) {
+			t.Errorf("%s: reported output still carries an escape code: %q", r.Name, r.Output)
+		}
+	}
+}
+
+// The migration example in the docs is what the founder will actually apply, so
+// it is parsed, validated and routed here instead of trusted.
+func TestDocsMigrationExampleIsValid(t *testing.T) {
+	doc, err := os.ReadFile(filepath.Join("..", "..", "..", "docs", "autopilot-check-profiles.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(doc)
+	start := strings.Index(text, "```json\n")
+	end := strings.Index(text[start+8:], "```")
+	if start < 0 || end < 0 {
+		t.Fatal("no json block in the docs")
+	}
+	var bc BoardConfig
+	if err := json.Unmarshal([]byte(text[start+8:start+8+end]), &bc); err != nil {
+		t.Fatalf("docs JSON does not parse into a BoardConfig: %v", err)
+	}
+	bc.RepoName, bc.RepoDir, bc.ReadyList, bc.Label, bc.SandboxReadOnly = "birunidev-space", "/tmp", "Autopilot Queue", "none", nil
+	if err := validate(t, bc); err != nil {
+		t.Fatalf("the documented migration is refused by config validation: %v", err)
+	}
+	route := map[string]string{
+		"[V2 FE TOOLCHAIN] Pinned FE toolchain, Axios/TanStack Router/Vitest deps, npm lock and checks": "core-frontend-toolchain",
+		"[V2 FE TAILWIND] Clean-room Tailwind v4 Core CSS and shadcn design tokens":                     "core-frontend-tailwind",
+		"[V2 FE QA] BRD-01 isolated preview fixture verification — child of BII-410":                    "core-frontend",
+		"[V2 BE QA] Boards cross-tenant PostgreSQL negative test — child of BII-491":                    "core-backend",
+	}
+	for title, want := range route {
+		if p, err := bc.ProfileFor(title); err != nil || p.Name != want {
+			t.Errorf("%q -> %q (%v), want %q", title, p.Name, err, want)
+		}
+	}
+	if _, err := bc.ProfileFor("[V2 FE ROUTES] something new"); !errors.Is(err, ErrNoProfile) {
+		t.Errorf("an undefined frontend slice must be refused, got %v", err)
+	}
+	// BII-898 and BII-899 own disjoint files and neither is the whole repo.
+	own := map[string]map[string]bool{}
+	for _, p := range bc.Profiles {
+		if p.Name != "core-frontend-toolchain" && p.Name != "core-frontend-tailwind" {
+			continue
+		}
+		own[p.Name] = map[string]bool{}
+		for _, f := range p.AllowedPaths {
+			own[p.Name][f] = true
+		}
+	}
+	for f := range own["core-frontend-toolchain"] {
+		if own["core-frontend-tailwind"][f] {
+			t.Errorf("BII-898 and BII-899 both own %s", f)
+		}
+	}
+	if len(own["core-frontend-toolchain"]) != 6 || len(own["core-frontend-tailwind"]) != 3 {
+		t.Errorf("file leases = %d and %d, want 6 and 3", len(own["core-frontend-toolchain"]), len(own["core-frontend-tailwind"]))
+	}
+	tailwind, _ := bc.ProfileFor("[V2 FE TAILWIND] x")
+	if err := tailwind.Owns([]string{"frontend/package.json"}); err == nil {
+		t.Error("the Tailwind profile must not own package.json (BII-898's lease)")
+	}
+	toolchain, _ := bc.ProfileFor("[V2 FE TOOLCHAIN] x")
+	if err := toolchain.Owns([]string{"frontend/src/styles/app.css"}); err == nil {
+		t.Error("the toolchain profile must not own the CSS files (BII-899's lease)")
 	}
 }

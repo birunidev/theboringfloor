@@ -258,3 +258,38 @@ func TestSetupDoesNotInheritTheMembersEnvironment(t *testing.T) {
 		t.Fatalf("a clean setup should let the card proceed: list %s, publishes %d", c.ListID, pub.calls)
 	}
 }
+
+func TestProfileOwnershipBlocksAChangeTheAgentDeclaredInScope(t *testing.T) {
+	needBwrap(t)
+	// The agent's own pre-flight says backend/** is in scope (readyPre), and it
+	// edits backend/x.py. The profile, from config, owns docs/** only.
+	e, fb, pub, _ := setup(t, readyPre, allLists, func(dir string) {
+		os.WriteFile(filepath.Join(dir, "backend", "x.py"), []byte("x = 2\n"), 0o644)
+	})
+	useProfiles(e, Profile{Name: "docs-only", TitlePrefixes: []string{"make"}, AllowedPaths: []string{"docs/**"}, Checks: []Check{{Name: "ok", Argv: []string{"true"}}}})
+	if err := e.Tick(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	c, _ := fb.GetCard(context.Background(), "c1")
+	if c.ListID != "l-hold" || pub.calls != 0 {
+		t.Fatalf("card ended in %s (publishes %d); a change the profile does not own must block it", c.ListID, pub.calls)
+	}
+	last := fb.Comments["c1"][len(fb.Comments["c1"])-1]
+	if !strings.Contains(last, "profile source ownership") || !strings.Contains(last, "backend/x.py") {
+		t.Fatalf("outcome does not name the unowned file:\n%s", last)
+	}
+}
+
+func TestProfileOwnershipAllowsExactlyTheOwnedFiles(t *testing.T) {
+	needBwrap(t)
+	e, fb, pub, _ := setup(t, readyPre, allLists, func(dir string) {
+		os.WriteFile(filepath.Join(dir, "backend", "x.py"), []byte("x = 2\n"), 0o644)
+	})
+	useProfiles(e, Profile{Name: "one-file", TitlePrefixes: []string{"make"}, AllowedPaths: []string{"backend/x.py"}, Checks: []Check{{Name: "ok", Argv: []string{"true"}}}})
+	if err := e.Tick(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if c, _ := fb.GetCard(context.Background(), "c1"); c.ListID != "l-review" || pub.calls != 1 {
+		t.Fatalf("an owned change should reach Review: list %s, publishes %d", c.ListID, pub.calls)
+	}
+}

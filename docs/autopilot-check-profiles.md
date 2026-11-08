@@ -39,6 +39,9 @@ never taken from card text and never chosen by a model.
   `--cache`, an absolute or `..` prefix, `--prefix=x`), and so is any `network`
   on a setup command;
 - `setup` commands that are forbidden commands (they are validated like checks);
+- `require_output` / `reject_output` that are not valid regular expressions;
+- `allowed_paths` that are empty, absolute, contain `..`, or name the whole
+  repository (`**`, `*`, `.`): list the files the card owns;
 - `require_files` / `require_npm.dir` that are absolute or escape the worktree.
 
 ## Runtime (every check, every round)
@@ -53,6 +56,19 @@ never taken from card text and never chosen by a model.
   summary of only skipped tests (for example no Docker means every PostgreSQL
   test is skipped).
 - A missing executable is a failed check (exit -1).
+- **Source ownership comes from config.** `allowed_paths` is the exact set of
+  files a card on the profile may change. It is checked against the worktree's
+  real changes (committed and untracked) before any check runs, and a violation
+  is a failed check named `profile source ownership`. The existing scope gate
+  still applies, but its scope is whatever the agent's pre-flight wrote; this
+  one cannot be widened by the agent.
+- **Output assertions.** An exit code is not enough evidence. `node:test` exits
+  0 for an empty test file (Node 24.16 reports it as one passing test) and for
+  skipped tests, and Vitest 5.1 exits 0 for `1 passed | 1 skipped | 1 todo`.
+  `require_output` must match and `reject_output` must not, so a profile can
+  demand a minimum test count and no skipped or todo tests. Matching and the
+  reported output use plain text: ANSI colour codes are stripped first, because
+  Vitest prints them even with `CI=1`.
 - Paths in `require_files` and `require_npm.dir` are resolved through symlinks
   and must stay inside the real worktree. A `frontend -> /etc` link, or a
   `package.json` that points outside, is refused.
@@ -117,47 +133,227 @@ never taken from card text and never chosen by a model.
 
 The private config is not edited by this change. After the new binary is built,
 `allow_exit: [5]` makes the current config fail validation on purpose, so
-migrate first. Paths are placeholders.
+migrate first. Paths are placeholders. This block is parsed and validated by
+`TestDocsMigrationExampleIsValid`, so it cannot drift from the code.
 
 ```json
 {
   "board_id": "board_938353e08e72",
   "name": "V2 Engineering",
   "checks": [],
-  "sandbox_read_only": ["<uv python dir>", "<venv dir>"],
+  "sandbox_read_only": [
+    "<uv python dir>",
+    "<venv dir>"
+  ],
   "profiles": [
     {
       "name": "core-frontend-toolchain",
-      "title_prefixes": ["[V2 FE TOOLCHAIN"],
-      "sandbox_read_only": ["<home>/.nvm/versions/node/<version>"],
-      "require_files": ["frontend/package-lock.json", "frontend/tests/setup.ts"],
-      "require_npm": {"dir": "frontend", "scripts": ["test"]},
+      "title_prefixes": [
+        "[V2 FE TOOLCHAIN"
+      ],
+      "sandbox_read_only": [
+        "<home>/.nvm/versions/node/<version>"
+      ],
+      "allowed_paths": [
+        "frontend/package.json",
+        "frontend/package-lock.json",
+        "frontend/vite.config.ts",
+        "frontend/vitest.config.ts",
+        "frontend/tests/setup.ts",
+        "frontend/tests/toolchain-smoke.test.ts"
+      ],
+      "require_files": [
+        "frontend/package-lock.json",
+        "frontend/vitest.config.ts",
+        "frontend/tests/setup.ts",
+        "frontend/tests/toolchain-smoke.test.ts"
+      ],
+      "require_npm": {
+        "dir": "frontend",
+        "scripts": [
+          "test",
+          "typecheck"
+        ]
+      },
       "checks": [
-        {"name": "install", "argv": ["npm", "--prefix", "frontend", "ci", "--ignore-scripts"], "network": true},
-        {"name": "test", "argv": ["npm", "--prefix", "frontend", "run", "test"]},
-        {"name": "lint", "argv": ["frontend/node_modules/.bin/oxlint", "frontend/src", "frontend/tests"]}
+        {
+          "name": "install",
+          "argv": [
+            "npm",
+            "--prefix",
+            "frontend",
+            "ci",
+            "--ignore-scripts"
+          ],
+          "network": true
+        },
+        {
+          "name": "test",
+          "argv": [
+            "npm",
+            "--prefix",
+            "frontend",
+            "run",
+            "test"
+          ],
+          "require_output": "(?m)^\\s*Tests\\s+[1-9][0-9]* passed",
+          "reject_output": "(?m)^\\s*Tests\\s.*\\b(skipped|todo|failed)\\b"
+        },
+        {
+          "name": "lint",
+          "argv": [
+            "frontend/node_modules/.bin/oxlint",
+            "frontend/src",
+            "frontend/tests"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "core-frontend-tailwind",
+      "title_prefixes": [
+        "[V2 FE TAILWIND"
+      ],
+      "sandbox_read_only": [
+        "<home>/.nvm/versions/node/<version>"
+      ],
+      "allowed_paths": [
+        "frontend/src/styles/app.css",
+        "frontend/src/styles/shadcn.css",
+        "frontend/tests/css-contract.test.mjs"
+      ],
+      "require_files": [
+        "frontend/src/styles/app.css",
+        "frontend/src/styles/shadcn.css",
+        "frontend/tests/css-contract.test.mjs"
+      ],
+      "checks": [
+        {
+          "name": "css source contract",
+          "argv": [
+            "node",
+            "--test",
+            "--test-reporter=tap",
+            "frontend/tests/css-contract.test.mjs"
+          ],
+          "require_output": "(?m)^# tests ([6-9]|[1-9][0-9]+)$",
+          "reject_output": "(?m)^# (skipped|todo|cancelled|fail) [1-9]"
+        },
+        {
+          "name": "tailwind imported exactly once",
+          "argv": [
+            "grep",
+            "-cE",
+            "^@import ['\\\"]tailwindcss['\\\"]",
+            "frontend/src/styles/app.css"
+          ],
+          "require_output": "(?m)^1$"
+        }
       ]
     },
     {
       "name": "core-frontend",
-      "title_prefixes": ["[V2 FE QA"],
-      "sandbox_read_only": ["<home>/.nvm/versions/node/<version>"],
-      "require_files": ["frontend/package-lock.json"],
-      "require_npm": {"dir": "frontend", "scripts": ["test", "typecheck", "build"]},
+      "title_prefixes": [
+        "[V2 FE QA"
+      ],
+      "sandbox_read_only": [
+        "<home>/.nvm/versions/node/<version>"
+      ],
+      "require_files": [
+        "frontend/package-lock.json"
+      ],
+      "require_npm": {
+        "dir": "frontend",
+        "scripts": [
+          "test",
+          "typecheck",
+          "build"
+        ]
+      },
       "checks": [
-        {"name": "install", "argv": ["npm", "--prefix", "frontend", "ci", "--ignore-scripts"], "network": true},
-        {"name": "test", "argv": ["npm", "--prefix", "frontend", "run", "test"]},
-        {"name": "lint", "argv": ["frontend/node_modules/.bin/oxlint", "frontend/src", "frontend/tests"]},
-        {"name": "typecheck", "argv": ["npm", "--prefix", "frontend", "run", "typecheck"]},
-        {"name": "build", "argv": ["npm", "--prefix", "frontend", "run", "build"]}
+        {
+          "name": "install",
+          "argv": [
+            "npm",
+            "--prefix",
+            "frontend",
+            "ci",
+            "--ignore-scripts"
+          ],
+          "network": true
+        },
+        {
+          "name": "test",
+          "argv": [
+            "npm",
+            "--prefix",
+            "frontend",
+            "run",
+            "test"
+          ],
+          "require_output": "(?m)^\\s*Tests\\s+[1-9][0-9]* passed",
+          "reject_output": "(?m)^\\s*Tests\\s.*\\b(skipped|todo|failed)\\b"
+        },
+        {
+          "name": "lint",
+          "argv": [
+            "frontend/node_modules/.bin/oxlint",
+            "frontend/src",
+            "frontend/tests"
+          ]
+        },
+        {
+          "name": "typecheck",
+          "argv": [
+            "npm",
+            "--prefix",
+            "frontend",
+            "run",
+            "typecheck"
+          ]
+        },
+        {
+          "name": "build",
+          "argv": [
+            "npm",
+            "--prefix",
+            "frontend",
+            "run",
+            "build"
+          ]
+        }
       ]
     },
     {
       "name": "core-backend",
-      "title_prefixes": ["[V2 BE", "[V2 API"],
+      "title_prefixes": [
+        "[V2 BE",
+        "[V2 API"
+      ],
       "checks": [
-        {"name": "compile", "argv": ["<venv>/bin/python", "-m", "compileall", "-q", "backend/app", "backend/tests"]},
-        {"name": "core slice tests", "argv": ["<venv>/bin/python", "-m", "pytest", "-q", "-p", "no:cacheprovider", "backend/tests/test_core_slice_local.py"]}
+        {
+          "name": "compile",
+          "argv": [
+            "<venv>/bin/python",
+            "-m",
+            "compileall",
+            "-q",
+            "backend/app",
+            "backend/tests"
+          ]
+        },
+        {
+          "name": "core slice tests",
+          "argv": [
+            "<venv>/bin/python",
+            "-m",
+            "pytest",
+            "-q",
+            "-p",
+            "no:cacheprovider",
+            "backend/tests/test_core_slice_local.py"
+          ]
+        }
       ]
     }
   ]
@@ -166,20 +362,39 @@ migrate first. Paths are placeholders.
 
 Notes:
 
-- Prefixes must not overlap (the validator refuses it), so the toolchain slice
-  has its own unique prefix and `core-frontend` is limited to explicit ones.
-  Any other frontend title, for example BII-899 `[V2 FE TAILWIND`, matches no
-  profile and is refused until a profile for it is defined. That is the
-  intended fail-closed behavior.
-- `core-frontend-toolchain` is for BII-898, which creates the lockfile, the
-  Vitest harness and its smoke test. It deliberately has no `typecheck` or
-  `build`: at the pinned base they fail for reasons the card does not own (see
-  the measurements below). That is a recorded baseline failure, not a pass.
+- Prefixes must not overlap (the validator refuses it), so each frontend slice
+  has its own unique prefix. Any other frontend title, for example a new
+  `[V2 FE ...` slice, matches no profile and is refused until a profile for it
+  is defined. That is the intended fail-closed behavior.
+- **`core-frontend-toolchain` (BII-898)** owns exactly six files, requires the
+  lockfile, Vitest config, setup and smoke test to exist, requires `test` and
+  `typecheck` scripts to exist, installs from the lockfile in the sandbox, runs
+  Vitest (at least one passing test; no skipped, todo or failed), and lints
+  `frontend/src` and `frontend/tests`. It deliberately does not run `typecheck`
+  or `build`: at the pinned base they fail for reasons the card does not own
+  (below). That is a recorded **baseline FAIL**, never a pass. Whether the
+  smoke test is *meaningful* (React, Query, Router and Axios actually
+  exercised) is a CTO review judgment; a machine can only require that real
+  tests ran.
+- **`core-frontend-tailwind` (BII-899)** owns exactly `app.css`, `shadcn.css`
+  and `css-contract.test.mjs`, and needs no packages, so it does not depend on
+  BII-898's lockfile. It runs the card's `node:test` file with the TAP reporter,
+  requires at least six tests and no skipped, todo, cancelled or failed ones
+  (an empty file counts as one test and is refused), and independently checks
+  with `grep` that `@import 'tailwindcss'` appears exactly once in `app.css`.
+  The contract test itself, which the card's agent writes, must assert the
+  acceptance criteria: exactly one Tailwind import and no second one in
+  `shadcn.css`; no import of landing, waiting-list or other legacy styles and
+  no remote `url(`; the semantic variables (`--background`, `--foreground`,
+  `--primary`, `--primary-foreground`, `--muted`, `--border`, `--ring`,
+  `--radius`) are defined; `--background` is white; Plus Jakarta Sans is the
+  sans family; a `:focus-visible` rule uses `--ring`; and the checker function
+  rejects a fixture with a duplicate import and one with a forbidden import.
+  No `build` check: the build fails at the base.
 - `core-frontend` includes `typecheck` and `build`, so every card using it ends
   Blocked until the clean-room import closure lands.
-- At the pinned Core base the frontend has no `test` or `typecheck` script, so
-  both profiles fail their preconditions until a card adds them. That is the
-  intended behavior for BII-898, which owns that toolchain.
+- Both frontend slice profiles need `node` on the `PATH` of the shell that
+  starts the worker, and the nvm version directory in `sandbox_read_only`.
 - Measured on Fedora at the pinned base `d79518b3` after `npm ci`:
   `npm run build` exits 2 with 192 TypeScript errors (98 are `TS2307`, a
   missing module such as `../components/ui`, `@/components/shadcn/ui/*` or
@@ -187,8 +402,8 @@ Notes:
   `tsc -b` alone also exits 2.
 - `npm run lint` runs `oxlint` with no ignore, so after `npm ci` it scans
   `node_modules` and exits 1 (one error under `node_modules/@tailwindcss`)
-  even though `frontend/src` only has a warning. The proposal calls the binary
-  directly on `src` and `tests` (exit 0 at the base for `src`).
+  even though `frontend/src` only has a warning. The profiles call the binary
+  directly on `src` and `tests`.
 - `core-backend` needs Docker and PostgreSQL. Without them every test is
   skipped, which the runner counts as a failure.
 - No `core-docs` or Lab profiles are proposed: no verified documentation check
